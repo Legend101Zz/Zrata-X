@@ -1,6 +1,76 @@
-def main():
-    print("Hello from backend!")
+"""
+FastAPI application entry point.
+"""
+from contextlib import asynccontextmanager
+
+from app.config import get_settings
+from app.database import Base, engine
+from app.routers import auth, market_data, portfolio, recommendations
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+settings = get_settings()
 
 
-if __name__ == "__main__":
-    main()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events."""
+    # Startup: Create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    yield
+    
+    # Shutdown: Cleanup
+    await engine.dispose()
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="AI-powered investment co-pilot for passive investors in India",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://passivecompounder.app",
+        "https://*.vercel.app"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(portfolio.router, prefix=settings.API_V1_PREFIX)
+app.include_router(recommendations.router, prefix=settings.API_V1_PREFIX)
+app.include_router(market_data.router, prefix=settings.API_V1_PREFIX)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "app": settings.APP_NAME,
+        "version": "1.0.0"
+    }
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with API info."""
+    return {
+        "message": "Welcome to Passive Compounder API",
+        "description": "AI-powered investment co-pilot for passive investors",
+        "docs": "/docs",
+        "health": "/health",
+        "version": "1.0.0"
+    }

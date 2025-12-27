@@ -5,19 +5,19 @@ from datetime import datetime
 from typing import List, Optional
 
 from app.database import get_db
+from app.models.asset_data import MutualFund
 from app.models.user import PortfolioHolding, RiskTolerance, Transaction, User
 from app.services.ai_engine.openrouter_client import OpenRouterClient
 from app.services.data_scrapers.mf_data_service import MutualFundDataService
+from app.services.market_data.market_data_aggregator import \
+    MarketDataAggregator
 from app.services.memory.supermemory_service import SupermemoryService
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.asset_data import MutualFund
-
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
-
 
 # Pydantic schemas
 class HoldingCreate(BaseModel):

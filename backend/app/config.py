@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment."""
     
     # App
-    APP_NAME: str = "Comreton-X"
+    APP_NAME: str = "Zrata-X"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
     
