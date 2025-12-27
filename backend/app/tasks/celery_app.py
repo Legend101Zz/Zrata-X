@@ -29,53 +29,91 @@ celery_app.conf.update(
 
 # Celery Beat schedule - periodic tasks
 celery_app.conf.beat_schedule = {
-    # Refresh mutual fund NAVs 3 times daily (matches MFAPI update schedule)
-    "refresh-mf-navs-morning": {
+    # =====================================================
+    # MUTUAL FUNDS (from MFAPI - updates 3x daily)
+    # =====================================================
+    "refresh-mf-navs-afternoon": {
         "task": "app.tasks.data_refresh_tasks.refresh_mf_navs",
-        "schedule": crontab(hour=9, minute=30),  # 9:30 AM IST
+        "schedule": crontab(hour=14, minute=30),  # After 2:05 PM IST update
     },
-    "refresh-mf-navs-evening": {
+    "refresh-mf-navs-night": {
         "task": "app.tasks.data_refresh_tasks.refresh_mf_navs",
-        "schedule": crontab(hour=21, minute=30),  # 9:30 PM IST
+        "schedule": crontab(hour=21, minute=30),  # After 9:05 PM IST update
     },
     
-    # Refresh FD rates once daily
+    # =====================================================
+    # FD RATES (change rarely, daily check is enough)
+    # =====================================================
     "refresh-fd-rates-daily": {
         "task": "app.tasks.data_refresh_tasks.refresh_fd_rates",
-        "schedule": crontab(hour=6, minute=0),  # 6 AM IST
+        "schedule": crontab(hour=7, minute=0),  # 7 AM IST
     },
     
-    # Refresh gold prices every 30 minutes during market hours
-    "refresh-gold-prices": {
+    # =====================================================
+    # GOLD/SILVER (for monthly investing, 2x daily is plenty)
+    # =====================================================
+    "refresh-metals-morning": {
         "task": "app.tasks.data_refresh_tasks.refresh_gold_prices",
-        "schedule": crontab(minute="*/30", hour="9-18"),  # Every 30 mins, 9 AM - 6 PM
+        "schedule": crontab(hour=10, minute=0),  # 10 AM IST
+    },
+    "refresh-metals-evening": {
+        "task": "app.tasks.data_refresh_tasks.refresh_gold_prices",
+        "schedule": crontab(hour=18, minute=0),  # 6 PM IST
     },
     
-    # Refresh news every hour
-    "refresh-news-hourly": {
+    # =====================================================
+    # NEWS (for monthly digest, 3x daily is enough)
+    # =====================================================
+    "refresh-news-morning": {
         "task": "app.tasks.data_refresh_tasks.refresh_news",
-        "schedule": crontab(minute=0),  # Every hour
-    },
-    
-    # Refresh macro indicators twice daily
-    "refresh-macro-morning": {
-        "task": "app.tasks.data_refresh_tasks.refresh_macro_indicators",
         "schedule": crontab(hour=8, minute=0),
     },
-    "refresh-macro-evening": {
+    "refresh-news-afternoon": {
+        "task": "app.tasks.data_refresh_tasks.refresh_news",
+        "schedule": crontab(hour=14, minute=0),
+    },
+    "refresh-news-evening": {
+        "task": "app.tasks.data_refresh_tasks.refresh_news",
+        "schedule": crontab(hour=20, minute=0),
+    },
+    
+    # =====================================================
+    # MACRO INDICATORS (RBI rates change ~6x/year, daily is overkill)
+    # =====================================================
+    "refresh-macro-daily": {
         "task": "app.tasks.data_refresh_tasks.refresh_macro_indicators",
-        "schedule": crontab(hour=18, minute=0),
+        "schedule": crontab(hour=9, minute=0),  # Once daily
     },
     
-    # Full data sync weekly
-    "weekly-full-sync": {
-        "task": "app.tasks.data_refresh_tasks.refresh_all_data",
-        "schedule": crontab(hour=2, minute=0, day_of_week=0),  # Sunday 2 AM
+    # =====================================================
+    # ETF PRICES (daily is enough for passive investing)
+    # =====================================================
+    "refresh-etf-prices-daily": {
+        "task": "app.tasks.data_refresh_tasks.refresh_etf_prices",
+        "schedule": crontab(hour=16, minute=30),  # After market close
     },
     
-    # Discover new FD sources monthly
-    "monthly-fd-discovery": {
-        "task": "app.tasks.data_refresh_tasks.discover_new_fd_sources",
-        "schedule": crontab(hour=3, minute=0, day_of_month=1),  # 1st of month
+    # =====================================================
+    # PORTFOLIO VALUES (daily update is sufficient)
+    # =====================================================
+    "update-portfolio-values-daily": {
+        "task": "app.tasks.data_refresh_tasks.update_portfolio_values",
+        "schedule": crontab(hour=17, minute=0),
+    },
+    
+    # =====================================================
+    # WEEKLY DIGEST (synthesis of news for users)
+    # =====================================================
+    "generate-weekly-digest": {
+        "task": "app.tasks.data_refresh_tasks.generate_weekly_digest",
+        "schedule": crontab(hour=10, minute=0, day_of_week=0),  # Sunday 10 AM
+    },
+    
+    # =====================================================
+    # CLEANUP (keep DB size manageable)
+    # =====================================================
+    "cleanup-old-data-weekly": {
+        "task": "app.tasks.data_refresh_tasks.cleanup_old_data",
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),
     },
 }
