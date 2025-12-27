@@ -1,0 +1,36 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+
+# Database
+sqlalchemy
+asyncpg
+alembic
+redis
+
+# HTTP & Async
+httpx
+aiohttp
+
+# Data & Scraping
+crawl4ai
+yfinance
+pandas
+numpy
+
+# AI & Memory
+openai
+supermemory
+
+# Task Queue
+celery
+celery-redbeat
+
+# Utils
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+orjson
