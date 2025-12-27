@@ -1,163 +1,183 @@
-/**
- * Portfolio Snapshot - Visual representation without number overload.
- */
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Wallet, TrendingUp, TrendingDown, Plus } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { usePortfolioSummary, useHoldings } from "@/hooks/use-portfolio";
+import { useAuthStore } from "@/lib/store/auth-store";
+import { cn } from "@/lib/utils";
 
-interface Allocation {
-    name: string;
-    value: number;
-    color: string;
+interface PortfolioSnapshotProps {
+    className?: string;
+    onAddHolding?: () => void;
 }
 
-const COLORS = {
-    equity: '#3B82F6',     // Blue
-    debt: '#10B981',       // Green
-    gold: '#F59E0B',       // Amber
-    fd: '#8B5CF6',         // Purple
-    silver: '#6B7280',     // Gray
-    other: '#EC4899',      // Pink
-};
+export function PortfolioSnapshot({
+    className,
+    onAddHolding,
+}: PortfolioSnapshotProps) {
+    const { isAuthenticated, isGuest } = useAuthStore();
+    const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
+    const { data: holdings, isLoading: holdingsLoading } = useHoldings();
 
-export function PortfolioSnapshot() {
-    const [allocation, setAllocation] = useState<Allocation[]>([]);
-    const [summary, setSummary] = useState({
-        totalValue: 0,
-        gainLoss: 0,
-        gainLossPercent: 0,
-    });
-    const [loading, setLoading] = useState(true);
+    const isLoading = summaryLoading || holdingsLoading;
 
-    useEffect(() => {
-        fetchPortfolioData();
-    }, []);
-
-    const fetchPortfolioData = async () => {
-        try {
-            const res = await fetch('/api/v1/portfolio/summary?user_id=1');
-            const data = await res.json();
-
-            // Transform allocation data
-            const allocationData = Object.entries(data.allocation).map(([key, val]: [string, any]) => ({
-                name: formatAssetName(key),
-                value: val.percent,
-                color: COLORS[key as keyof typeof COLORS] || COLORS.other,
-            }));
-
-            setAllocation(allocationData);
-            setSummary({
-                totalValue: data.total_current_value,
-                gainLoss: data.total_gain_loss,
-                gainLossPercent: data.total_gain_loss_percent,
-            });
-        } catch (error) {
-            console.error('Failed to fetch portfolio:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const formatAssetName = (name: string): string => {
-        const names: Record<string, string> = {
-            equity: 'Equity',
-            debt: 'Debt',
-            gold: 'Gold',
-            silver: 'Silver',
-            fd: 'Fixed Deposits',
-            mutual_fund: 'Mutual Funds',
-            etf: 'ETFs',
-        };
-        return names[name] || name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    };
-
-    const formatCurrency = (amount: number): string => {
-        if (amount >= 10000000) {
-            return `₹${(amount / 10000000).toFixed(2)} Cr`;
-        } else if (amount >= 100000) {
-            return `₹${(amount / 100000).toFixed(2)} L`;
-        }
-        return `₹${amount.toLocaleString('en-IN')}`;
-    };
-
-    if (loading) {
-        return <div className="h-64 animate-pulse bg-slate-200 rounded-2xl" />;
+    // Guest state
+    if (isGuest || !isAuthenticated) {
+        return (
+            <Card className={cn("border-border bg-card", className)}>
+                <CardContent className="py-8 text-center">
+                    <Wallet className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                    <h3 className="font-medium mb-2">Track Your Portfolio</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                        Sign in to add your holdings and get portfolio-aware suggestions.
+                    </p>
+                    <Button variant="outline" size="sm">
+                        Sign in to continue
+                    </Button>
+                </CardContent>
+            </Card>
+        );
     }
 
-    return (
-        <Card className="overflow-hidden border-0 shadow-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-lg font-medium text-slate-700 dark:text-slate-200">
-                    Your Portfolio
-                </CardTitle>
-            </CardHeader>
-            <CardContent>
-                <div className="flex flex-col md:flex-row items-center gap-8">
-                    {/* Pie Chart */}
-                    <div className="w-48 h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={allocation}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={50}
-                                    outerRadius={70}
-                                    paddingAngle={2}
-                                    dataKey="value"
-                                >
-                                    {allocation.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    formatter={(value: number) => [`${value.toFixed(1)}%`, 'Allocation']}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
+    // Loading state
+    if (isLoading) {
+        return (
+            <Card className={cn("border-border bg-card", className)}>
+                <CardHeader className="pb-2">
+                    <Skeleton className="h-5 w-32" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <Skeleton className="h-16 w-full" />
+                    <div className="grid grid-cols-3 gap-4">
+                        <Skeleton className="h-12 w-full" />
+                        <Skeleton className="h-12 w-full" />
+                        <Skeleton className="h-12 w-full" />
                     </div>
+                </CardContent>
+            </Card>
+        );
+    }
 
-                    {/* Summary */}
-                    <div className="flex-1 space-y-4">
-                        {/* Total Value */}
-                        <div>
-                            <p className="text-sm text-slate-500 dark:text-slate-400">Total Value</p>
-                            <p className="text-3xl font-semibold text-slate-800 dark:text-slate-100">
-                                {formatCurrency(summary.totalValue)}
-                            </p>
+    // Empty state
+    if (!holdings || holdings.length === 0) {
+        return (
+            <Card className={cn("border-border bg-card border-dashed", className)}>
+                <CardContent className="py-8 text-center">
+                    <Wallet className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                    <h3 className="font-medium mb-2">No holdings yet</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                        Add your existing investments to get better suggestions.
+                    </p>
+                    <Button onClick={onAddHolding}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add your first holding
+                    </Button>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    const isPositive = (summary?.returns_percentage || 0) >= 0;
+
+    return (
+        <Card className={cn("border-border bg-card", className)}>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                    <Wallet className="h-4 w-4 text-primary" />
+                    Portfolio Snapshot
+                </CardTitle>
+                <Button variant="ghost" size="sm" onClick={onAddHolding}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add
+                </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {/* Total Value */}
+                <div className="p-4 rounded-lg bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
+                    <p className="text-sm text-muted-foreground mb-1">Total Value</p>
+                    <p className="text-3xl font-bold font-mono">
+                        ₹{(summary?.total_value || 0).toLocaleString("en-IN")}
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                        {isPositive ? (
+                            <TrendingUp className="h-4 w-4 text-green-400" />
+                        ) : (
+                            <TrendingDown className="h-4 w-4 text-red-400" />
+                        )}
+                        <span
+                            className={cn(
+                                "text-sm font-mono",
+                                isPositive ? "text-green-400" : "text-red-400"
+                            )}
+                        >
+                            {isPositive ? "+" : ""}
+                            {summary?.returns_percentage?.toFixed(2)}% (₹
+                            {Math.abs(summary?.total_returns || 0).toLocaleString("en-IN")})
+                        </span>
+                    </div>
+                </div>
+
+                {/* Allocation Breakdown */}
+                {summary?.allocation && summary.allocation.length > 0 && (
+                    <div>
+                        <p className="text-xs text-muted-foreground mb-2">Allocation</p>
+                        <div className="flex h-2 rounded-full overflow-hidden bg-secondary">
+                            {summary.allocation.map((cat, i) => (
+                                <div
+                                    key={cat.category}
+                                    className={cn("h-full", getAllocationColor(i))}
+                                    style={{ width: `${cat.percentage}%` }}
+                                />
+                            ))}
                         </div>
-
-                        {/* Gain/Loss */}
-                        <div>
-                            <p className="text-sm text-slate-500 dark:text-slate-400">Overall Returns</p>
-                            <p className={`text-xl font-medium ${summary.gainLoss >= 0 ? 'text-green-600' : 'text-red-600'
-                                }`}>
-                                {summary.gainLoss >= 0 ? '+' : ''}{formatCurrency(summary.gainLoss)}
-                                <span className="text-sm ml-2">
-                                    ({summary.gainLossPercent >= 0 ? '+' : ''}{summary.gainLossPercent.toFixed(2)}%)
-                                </span>
-                            </p>
-                        </div>
-
-                        {/* Legend */}
-                        <div className="flex flex-wrap gap-3 pt-2">
-                            {allocation.map((item) => (
-                                <div key={item.name} className="flex items-center gap-1.5">
+                        <div className="flex flex-wrap gap-3 mt-3">
+                            {summary.allocation.map((cat, i) => (
+                                <div key={cat.category} className="flex items-center gap-1.5">
                                     <div
-                                        className="w-3 h-3 rounded-full"
-                                        style={{ backgroundColor: item.color }}
+                                        className={cn("h-2.5 w-2.5 rounded", getAllocationColor(i))}
                                     />
-                                    <span className="text-xs text-slate-600 dark:text-slate-300">
-                                        {item.name}
+                                    <span className="text-xs text-muted-foreground">
+                                        {cat.category}
+                                    </span>
+                                    <span className="text-xs font-mono">
+                                        {cat.percentage.toFixed(0)}%
                                     </span>
                                 </div>
                             ))}
                         </div>
                     </div>
+                )}
+
+                {/* Quick Stats */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="p-3 rounded-lg bg-secondary/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground">Holdings</p>
+                        <p className="text-lg font-bold">{summary?.holdings_count || 0}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-secondary/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground">Invested</p>
+                        <p className="text-lg font-bold font-mono">
+                            ₹{((summary?.total_invested || 0) / 100000).toFixed(1)}L
+                        </p>
+                    </div>
                 </div>
             </CardContent>
         </Card>
     );
+}
+
+function getAllocationColor(index: number): string {
+    const colors = [
+        "bg-blue-500",
+        "bg-green-500",
+        "bg-yellow-500",
+        "bg-purple-500",
+        "bg-orange-500",
+        "bg-teal-500",
+        "bg-pink-500",
+        "bg-indigo-500",
+    ];
+    return colors[index % colors.length];
 }

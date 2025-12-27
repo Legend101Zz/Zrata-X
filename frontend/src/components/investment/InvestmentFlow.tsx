@@ -1,281 +1,283 @@
-/**
- * Investment Flow - The heart of the app.
- * Simple question: "How much do you want to invest?"
- */
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Loader2, Sparkles, ArrowRight, Info } from 'lucide-react';
-import { RecommendationCard } from './RecommendationCard';
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+    IndianRupee,
+    ArrowRight,
+    ChevronLeft,
+    Shield,
+    Zap,
+    Scale,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { useGenerateAllocation } from "@/hooks/use-allocation";
+import { RecommendationCard } from "./RecommendationCard";
+import type { AllocationResponse } from "@/lib/api/types";
 
-type RiskLevel = 'low' | 'moderate' | 'high';
+type Step = "amount" | "risk" | "results";
+type RiskProfile = "conservative" | "moderate" | "aggressive";
 
-interface Suggestion {
-    asset_type: string;
-    instrument_name: string;
-    instrument_id: string;
-    amount: number;
-    percentage: number;
-    reason: string;
-    highlight?: string;
-    current_rate?: number;
+interface InvestmentFlowProps {
+    className?: string;
+    onComplete?: (result: AllocationResponse) => void;
 }
 
-interface Recommendation {
-    id: number;
-    suggestions: Suggestion[];
-    summary: string;
-    risk_note: string;
-    tax_note?: string;
-}
+export function InvestmentFlow({ className, onComplete }: InvestmentFlowProps) {
+    const [step, setStep] = useState<Step>("amount");
+    const [amount, setAmount] = useState("");
+    const [riskProfile, setRiskProfile] = useState<RiskProfile>("moderate");
+    const [result, setResult] = useState<AllocationResponse | null>(null);
 
-export function InvestmentFlow() {
-    const [amount, setAmount] = useState<string>('');
-    const [riskLevel, setRiskLevel] = useState<RiskLevel>('moderate');
-    const [avoidLockIns, setAvoidLockIns] = useState(false);
-    const [preferTaxSaving, setPreferTaxSaving] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
-    const [step, setStep] = useState<'input' | 'preferences' | 'result'>('input');
+    const { mutate: generateAllocation, isPending } = useGenerateAllocation();
 
-    const handleAnalyze = async () => {
-        if (!amount || isNaN(Number(amount))) return;
-
-        setLoading(true);
-        try {
-            const res = await fetch('/api/v1/recommend/invest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    amount: Number(amount),
-                    risk_override: riskLevel,
-                    avoid_lock_ins: avoidLockIns,
-                    prefer_tax_saving: preferTaxSaving,
-                    include_fds: true,
-                    include_gold: true,
-                }),
-            });
-
-            const data = await res.json();
-            setRecommendation(data);
-            setStep('result');
-        } catch (error) {
-            console.error('Failed to get recommendation:', error);
-        } finally {
-            setLoading(false);
+    const handleAmountSubmit = () => {
+        if (parseFloat(amount) > 0) {
+            setStep("risk");
         }
     };
 
-    const formatAmount = (value: string): string => {
-        const num = parseInt(value.replace(/,/g, ''), 10);
-        if (isNaN(num)) return '';
-        return num.toLocaleString('en-IN');
-    };
-
-    const riskLabels: Record<RiskLevel, string> = {
-        low: 'Conservative',
-        moderate: 'Balanced',
-        high: 'Growth-focused',
-    };
-
-    // Step 1: Amount Input
-    if (step === 'input') {
-        return (
-            <Card className="border-0 shadow-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                    <CardTitle className="text-xl font-medium text-center text-slate-700 dark:text-slate-200">
-                        How much do you want to invest this month?
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-8">
-                    <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl text-slate-400">
-                            ₹
-                        </span>
-                        <Input
-                            type="text"
-                            value={formatAmount(amount)}
-                            onChange={(e) => setAmount(e.target.value.replace(/,/g, ''))}
-                            placeholder="50,000"
-                            className="text-3xl font-light text-center h-16 pl-10 border-2 focus:border-blue-500"
-                        />
-                    </div>
-
-                    {/* Quick amount buttons */}
-                    <div className="flex flex-wrap justify-center gap-2">
-                        {[10000, 25000, 50000, 100000].map((val) => (
-                            <Button
-                                key={val}
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setAmount(val.toString())}
-                                className="rounded-full"
-                            >
-                                ₹{(val / 1000)}K
-                            </Button>
-                        ))}
-                    </div>
-
-                    <Button
-                        onClick={() => setStep('preferences')}
-                        disabled={!amount || Number(amount) <= 0}
-                        className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700"
-                    >
-                        Continue
-                        <ArrowRight className="ml-2 h-5 w-5" />
-                    </Button>
-                </CardContent>
-            </Card>
+    const handleRiskSubmit = () => {
+        generateAllocation(
+            {
+                amount: parseFloat(amount),
+                risk_profile: riskProfile,
+            },
+            {
+                onSuccess: (data) => {
+                    setResult(data);
+                    setStep("results");
+                    onComplete?.(data);
+                },
+            }
         );
-    }
+    };
 
-    // Step 2: Preferences
-    if (step === 'preferences') {
-        return (
-            <Card className="border-0 shadow-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                    <CardTitle className="text-xl font-medium text-center text-slate-700 dark:text-slate-200">
-                        Quick preferences
-                    </CardTitle>
-                    <p className="text-center text-slate-500">
-                        Investing ₹{formatAmount(amount)}
-                    </p>
-                </CardHeader>
-                <CardContent className="space-y-8">
-                    {/* Risk Slider */}
-                    <div className="space-y-4">
-                        <Label className="text-sm text-slate-600 dark:text-slate-300">
-                            Risk Preference
-                        </Label>
-                        <div className="px-2">
-                            <Slider
-                                value={[['low', 'moderate', 'high'].indexOf(riskLevel)]}
-                                onValueChange={([val]) => setRiskLevel(['low', 'moderate', 'high'][val] as RiskLevel)}
-                                max={2}
-                                step={1}
-                                className="w-full"
-                            />
-                        </div>
-                        <div className="flex justify-between text-xs text-slate-500">
-                            <span>Safe</span>
-                            <span className="font-medium text-blue-600">{riskLabels[riskLevel]}</span>
-                            <span>Growth</span>
-                        </div>
-                    </div>
+    const handleBack = () => {
+        if (step === "risk") setStep("amount");
+        if (step === "results") setStep("risk");
+    };
 
-                    {/* Toggle preferences */}
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Label htmlFor="no-lockin" className="text-sm">
-                                    Avoid lock-in periods
-                                </Label>
-                                <Info className="h-4 w-4 text-slate-400" />
-                            </div>
-                            <Switch
-                                id="no-lockin"
-                                checked={avoidLockIns}
-                                onCheckedChange={setAvoidLockIns}
-                            />
-                        </div>
+    const handleReset = () => {
+        setStep("amount");
+        setAmount("");
+        setRiskProfile("moderate");
+        setResult(null);
+    };
 
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Label htmlFor="tax-saving" className="text-sm">
-                                    Prefer tax-saving (80C)
-                                </Label>
-                                <Info className="h-4 w-4 text-slate-400" />
-                            </div>
-                            <Switch
-                                id="tax-saving"
-                                checked={preferTaxSaving}
-                                onCheckedChange={setPreferTaxSaving}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="flex gap-3">
-                        <Button
-                            variant="outline"
-                            onClick={() => setStep('input')}
-                            className="flex-1"
-                        >
+    return (
+        <Card className={cn("border-border bg-card overflow-hidden", className)}>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Monthly Investment</CardTitle>
+                    {step !== "amount" && (
+                        <Button variant="ghost" size="sm" onClick={handleBack}>
+                            <ChevronLeft className="h-4 w-4 mr-1" />
                             Back
                         </Button>
-                        <Button
-                            onClick={handleAnalyze}
-                            disabled={loading}
-                            className="flex-1 bg-blue-600 hover:bg-blue-700"
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Analyzing...
-                                </>
-                            ) : (
-                                <>
-                                    <Sparkles className="mr-2 h-4 w-4" />
-                                    Get Suggestions
-                                </>
+                    )}
+                </div>
+                {/* Progress indicator */}
+                <div className="flex gap-1 mt-2">
+                    {(["amount", "risk", "results"] as Step[]).map((s, i) => (
+                        <div
+                            key={s}
+                            className={cn(
+                                "h-1 flex-1 rounded-full transition-colors",
+                                step === s || (["amount", "risk", "results"].indexOf(step) > i)
+                                    ? "bg-primary"
+                                    : "bg-secondary"
                             )}
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    // Step 3: Results
-    return (
-        <div className="space-y-6">
-            <Card className="border-0 shadow-lg bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                    <CardTitle className="text-xl font-medium text-slate-700 dark:text-slate-200">
-                        Here's what I'd suggest
-                    </CardTitle>
-                    <p className="text-sm text-slate-500">
-                        For ₹{formatAmount(amount)} with {riskLabels[riskLevel].toLowerCase()} approach
-                    </p>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    {recommendation?.suggestions.map((suggestion, index) => (
-                        <RecommendationCard key={index} suggestion={suggestion} />
+                        />
                     ))}
+                </div>
+            </CardHeader>
 
-                    {/* Summary */}
-                    {recommendation?.summary && (
-                        <div className="mt-6 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
-                            <p className="text-sm text-slate-600 dark:text-slate-300">
-                                {recommendation.summary}
+            <CardContent className="pt-4">
+                <AnimatePresence mode="wait">
+                    {step === "amount" && (
+                        <motion.div
+                            key="amount"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="space-y-6"
+                        >
+                            <div>
+                                <label className="text-sm text-muted-foreground mb-3 block">
+                                    How much can you invest this month?
+                                </label>
+                                <div className="relative">
+                                    <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                                    <Input
+                                        type="number"
+                                        placeholder="25,000"
+                                        value={amount}
+                                        onChange={(e) => setAmount(e.target.value)}
+                                        className="pl-10 h-12 text-lg bg-background"
+                                        autoFocus
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                {[10000, 25000, 50000, 100000].map((val) => (
+                                    <Button
+                                        key={val}
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setAmount(val.toString())}
+                                        className="text-xs"
+                                    >
+                                        ₹{val.toLocaleString("en-IN")}
+                                    </Button>
+                                ))}
+                            </div>
+
+                            <Button
+                                className="w-full"
+                                size="lg"
+                                onClick={handleAmountSubmit}
+                                disabled={!amount || parseFloat(amount) <= 0}
+                            >
+                                Continue
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                            </Button>
+                        </motion.div>
+                    )}
+
+                    {step === "risk" && (
+                        <motion.div
+                            key="risk"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="space-y-6"
+                        >
+                            <div>
+                                <label className="text-sm text-muted-foreground mb-4 block">
+                                    What's your comfort level with risk?
+                                </label>
+                                <div className="space-y-3">
+                                    <RiskOption
+                                        value="conservative"
+                                        label="Conservative"
+                                        description="Prioritize capital protection. Lower returns, lower risk."
+                                        icon={<Shield className="h-5 w-5" />}
+                                        selected={riskProfile === "conservative"}
+                                        onSelect={() => setRiskProfile("conservative")}
+                                    />
+                                    <RiskOption
+                                        value="moderate"
+                                        label="Moderate"
+                                        description="Balanced approach. Mix of growth and safety."
+                                        icon={<Scale className="h-5 w-5" />}
+                                        selected={riskProfile === "moderate"}
+                                        onSelect={() => setRiskProfile("moderate")}
+                                    />
+                                    <RiskOption
+                                        value="aggressive"
+                                        label="Aggressive"
+                                        description="Focus on growth. Higher potential returns, higher volatility."
+                                        icon={<Zap className="h-5 w-5" />}
+                                        selected={riskProfile === "aggressive"}
+                                        onSelect={() => setRiskProfile("aggressive")}
+                                    />
+                                </div>
+                            </div>
+
+                            <Button
+                                className="w-full"
+                                size="lg"
+                                onClick={handleRiskSubmit}
+                                disabled={isPending}
+                            >
+                                {isPending ? "Calculating..." : "Get Suggestions"}
+                                {!isPending && <ArrowRight className="ml-2 h-4 w-4" />}
+                            </Button>
+                        </motion.div>
+                    )}
+
+                    {step === "results" && result && (
+                        <motion.div
+                            key="results"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="space-y-4"
+                        >
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">
+                                    Allocation for ₹{parseFloat(amount).toLocaleString("en-IN")}
+                                </span>
+                                <Button variant="ghost" size="sm" onClick={handleReset}>
+                                    Start over
+                                </Button>
+                            </div>
+
+                            <div className="space-y-3">
+                                {result.allocations.map((allocation) => (
+                                    <RecommendationCard
+                                        key={allocation.id}
+                                        allocation={allocation}
+                                    />
+                                ))}
+                            </div>
+
+                            <p className="text-xs text-muted-foreground text-center pt-2">
+                                {result.disclaimer}
                             </p>
-                        </div>
+                        </motion.div>
                     )}
+                </AnimatePresence>
+            </CardContent>
+        </Card>
+    );
+}
 
-                    {/* Risk Note */}
-                    {recommendation?.risk_note && (
-                        <p className="text-xs text-slate-500 italic">
-                            ⚠️ {recommendation.risk_note}
-                        </p>
+interface RiskOptionProps {
+    value: RiskProfile;
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+    selected: boolean;
+    onSelect: () => void;
+}
+
+function RiskOption({
+    label,
+    description,
+    icon,
+    selected,
+    onSelect,
+}: RiskOptionProps) {
+    return (
+        <button
+            onClick={onSelect}
+            className={cn(
+                "w-full p-4 rounded-lg border text-left transition-all",
+                selected
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/50 hover:bg-secondary/30"
+            )}
+        >
+            <div className="flex items-start gap-3">
+                <div
+                    className={cn(
+                        "p-2 rounded-lg",
+                        selected ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground"
                     )}
-                </CardContent>
-            </Card>
-
-            <Button
-                variant="outline"
-                onClick={() => {
-                    setStep('input');
-                    setRecommendation(null);
-                }}
-                className="w-full"
-            >
-                Start Over
-            </Button>
-        </div>
+                >
+                    {icon}
+                </div>
+                <div>
+                    <p className="font-medium">{label}</p>
+                    <p className="text-sm text-muted-foreground">{description}</p>
+                </div>
+            </div>
+        </button>
     );
 }

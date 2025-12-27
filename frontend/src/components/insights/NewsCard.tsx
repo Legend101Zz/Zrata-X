@@ -1,106 +1,134 @@
-/**
- * NewsCard - Displays a single news item with sentiment indicator
- */
-'use client';
+"use client";
 
-import { ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Newspaper, ExternalLink, Clock } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+// Note: News would come from a news API or scraper
+// For now, using static structure that can be connected to API
 
 interface NewsItem {
-    id: number;
+    id: string;
     title: string;
-    summary: string | null;
     source: string;
+    category: "market" | "policy" | "rates" | "general";
     url: string;
     published_at: string;
-    sentiment_score: number | null;
-    categories: string[];
+    summary?: string;
 }
 
-interface Props {
-    news: NewsItem;
+interface NewsCardProps {
+    className?: string;
+    items?: NewsItem[];
+    isLoading?: boolean;
 }
 
-const categoryColors: Record<string, string> = {
-    gold: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
-    rbi: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    inflation: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-    equity: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-    debt: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-    tax: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
+const categoryColors: Record<NewsItem["category"], string> = {
+    market: "bg-blue-500/20 text-blue-400",
+    policy: "bg-purple-500/20 text-purple-400",
+    rates: "bg-green-500/20 text-green-400",
+    general: "bg-gray-500/20 text-gray-400",
 };
 
-export function NewsCard({ news }: Props) {
-    const getSentimentIcon = () => {
-        if (news.sentiment_score === null) return null;
-        if (news.sentiment_score > 0.2) return <TrendingUp className="h-3 w-3 text-green-500" />;
-        if (news.sentiment_score < -0.2) return <TrendingDown className="h-3 w-3 text-red-500" />;
-        return <Minus className="h-3 w-3 text-slate-400" />;
-    };
+export function NewsCard({ className, items = [], isLoading }: NewsCardProps) {
+    // Mock data for display - replace with actual API
+    const mockNews: NewsItem[] = [
+        {
+            id: "1",
+            title: "RBI keeps repo rate unchanged at 6.5% for 11th time",
+            source: "Economic Times",
+            category: "policy",
+            url: "#",
+            published_at: new Date().toISOString(),
+            summary: "The central bank maintained status quo on interest rates.",
+        },
+        {
+            id: "2",
+            title: "Small Finance Banks offer up to 9% FD rates for senior citizens",
+            source: "Mint",
+            category: "rates",
+            url: "#",
+            published_at: new Date(Date.now() - 86400000).toISOString(),
+        },
+        {
+            id: "3",
+            title: "Nifty 50 hits all-time high amid strong FII inflows",
+            source: "Business Standard",
+            category: "market",
+            url: "#",
+            published_at: new Date(Date.now() - 172800000).toISOString(),
+        },
+    ];
 
-    const formatDate = (dateStr: string) => {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-
-        if (diffHours < 1) return 'Just now';
-        if (diffHours < 24) return `${diffHours}h ago`;
-        if (diffHours < 48) return 'Yesterday';
-        return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-    };
+    const displayItems = items.length > 0 ? items : mockNews;
 
     return (
-        <a
-            href={news.url}
+        <Card className={cn("border-border bg-card", className)}>
+            <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                    <Newspaper className="h-4 w-4 text-primary" />
+                    Relevant Updates
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {displayItems.map((item) => (
+                    <NewsItem key={item.id} item={item} />
+                ))}
+            </CardContent>
+        </Card>
+    );
+}
+
+function NewsItem({ item }: { item: NewsItem }) {
+    const timeAgo = getTimeAgo(new Date(item.published_at));
+
+    return (
+
+        <a href={item.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 transition-all group"
+            className="block group"
         >
-            <div className="flex items-start gap-3">
-                {/* Sentiment indicator */}
-                <div className="flex-shrink-0 mt-1">
-                    {getSentimentIcon()}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                    {/* Title */}
-                    <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                        {news.title}
-                    </h4>
-
-                    {/* Summary */}
-                    {news.summary && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                            {news.summary}
-                        </p>
-                    )}
-
-                    {/* Meta */}
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="text-xs text-slate-400">
-                            {news.source}
-                        </span>
-                        <span className="text-xs text-slate-300 dark:text-slate-600">•</span>
-                        <span className="text-xs text-slate-400">
-                            {formatDate(news.published_at)}
-                        </span>
-
-                        {/* Categories */}
-                        {news.categories && news.categories.slice(0, 2).map((cat, index) => (
-                            <Badge
-                                key={index}
-                                variant="outline"
-                                className={`text-xs py-0 ${categoryColors[cat] || ''}`}
-                            >
-                                {cat}
-                            </Badge>
-                        ))}
+            <div className="p-3 rounded-lg border border-border/50 hover:border-border hover:bg-secondary/20 transition-all">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                    <Badge
+                        variant="secondary"
+                        className={cn("text-[10px]", categoryColors[item.category])}
+                    >
+                        {item.category}
+                    </Badge>
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Clock className="h-3 w-3" />
+                        {timeAgo}
                     </div>
                 </div>
-
-                {/* External link icon */}
-                <ExternalLink className="h-4 w-4 text-slate-300 group-hover:text-blue-500 flex-shrink-0" />
+                <p className="text-sm font-medium leading-tight group-hover:text-primary transition-colors">
+                    {item.title}
+                </p>
+                {item.summary && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                        {item.summary}
+                    </p>
+                )}
+                <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
+                    <span>{item.source}</span>
+                    <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
             </div>
-        </a>
+        </a >
     );
+}
+
+function getTimeAgo(date: Date): string {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 1) return "Just now";
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }

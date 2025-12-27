@@ -1,111 +1,133 @@
-/**
- * FD Opportunity Card - Displays a single FD rate opportunity
- */
-'use client';
+"use client";
 
-import { Badge } from '@/components/ui/badge';
-import { ExternalLink, Star, CreditCard } from 'lucide-react';
+import { Building2, TrendingUp, ExternalLink, ChevronRight } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useTopFDRates } from "@/hooks/use-fd-rates";
+import { cn } from "@/lib/utils";
 
-interface FDRate {
-    id: number;
-    bank_name: string;
-    bank_type: string;
-    tenure_display: string;
-    interest_rate_general: number;
-    interest_rate_senior: number | null;
-    has_credit_card_offer: boolean;
-    special_features: Record<string, any> | null;
+interface FDOpportunityCardProps {
+    className?: string;
+    limit?: number;
+    showHeader?: boolean;
 }
 
-interface Props {
-    fd: FDRate;
-}
+export function FDOpportunityCard({
+    className,
+    limit = 3,
+    showHeader = true,
+}: FDOpportunityCardProps) {
+    const { data: rates, isLoading, error } = useTopFDRates(limit);
 
-const bankTypeLabels: Record<string, string> = {
-    small_finance: 'Small Finance Bank',
-    private: 'Private Bank',
-    public: 'Public Bank',
-    nbfc: 'NBFC',
-};
-
-const bankTypeColors: Record<string, string> = {
-    small_finance: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-    private: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    public: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-    nbfc: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
-};
-
-export function FDOpportunityCard({ fd }: Props) {
-    const isHighYield = fd.interest_rate_general >= 8.0;
+    if (error) {
+        return (
+            <Card className={cn("border-border", className)}>
+                <CardContent className="py-6 text-center text-muted-foreground">
+                    Unable to load FD rates. Please try again later.
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
-        <div className={`p-3 rounded-lg border transition-all hover:shadow-md ${isHighYield
-                ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
-                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-            }`}>
-            <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                    {/* Bank name and type */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-medium text-slate-800 dark:text-slate-200 truncate">
-                            {fd.bank_name}
-                        </h4>
-                        <Badge
-                            variant="outline"
-                            className={`text-xs ${bankTypeColors[fd.bank_type] || ''}`}
+        <Card className={cn("border-border bg-card", className)}>
+            {showHeader && (
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Building2 className="h-4 w-4 text-green-400" />
+                        Top FD Opportunities
+                    </CardTitle>
+                </CardHeader>
+            )}
+            <CardContent className="space-y-3">
+                {isLoading ? (
+                    <>
+                        {[...Array(limit)].map((_, i) => (
+                            <FDRateSkeleton key={i} />
+                        ))}
+                    </>
+                ) : (
+                    <>
+                        {rates?.map((rate, index) => (
+                            <FDRateItem key={rate.id} rate={rate} rank={index + 1} />
+                        ))}
+                        <Button
+                            variant="ghost"
+                            className="w-full text-muted-foreground hover:text-foreground"
+                            size="sm"
                         >
-                            {bankTypeLabels[fd.bank_type] || fd.bank_type}
+                            View all FD rates
+                            <ChevronRight className="h-4 w-4 ml-1" />
+                        </Button>
+                    </>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+interface FDRateItemProps {
+    rate: {
+        id: string;
+        bank_name: string;
+        bank_type: string;
+        tenure_months: number;
+        rate_regular: number;
+        rate_senior: number;
+        source_url?: string;
+    };
+    rank: number;
+}
+
+function FDRateItem({ rate, rank }: FDRateItemProps) {
+    const tenureLabel =
+        rate.tenure_months >= 12
+            ? `${rate.tenure_months / 12}Y`
+            : `${rate.tenure_months}M`;
+
+    return (
+        <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+            <div className="flex items-center gap-3">
+                <span className="text-xs font-mono text-muted-foreground w-4">
+                    #{rank}
+                </span>
+                <div>
+                    <p className="font-medium text-sm">{rate.bank_name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {rate.bank_type.replace("_", " ")}
                         </Badge>
+                        <span className="text-xs text-muted-foreground">{tenureLabel}</span>
                     </div>
-
-                    {/* Tenure */}
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                        {fd.tenure_display}
-                    </p>
-
-                    {/* Features */}
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        {isHighYield && (
-                            <Badge className="bg-green-500 text-white text-xs">
-                                <Star className="h-3 w-3 mr-1 fill-white" />
-                                High Yield
-                            </Badge>
-                        )}
-                        {fd.has_credit_card_offer && (
-                            <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 dark:text-blue-300">
-                                <CreditCard className="h-3 w-3 mr-1" />
-                                CC Available
-                            </Badge>
-                        )}
-                        {fd.interest_rate_senior && fd.interest_rate_senior > fd.interest_rate_general && (
-                            <Badge variant="outline" className="text-xs border-purple-300 text-purple-700 dark:text-purple-300">
-                                Senior: {fd.interest_rate_senior}%
-                            </Badge>
-                        )}
-                    </div>
-                </div>
-
-                {/* Rate */}
-                <div className="text-right flex-shrink-0">
-                    <div className={`text-2xl font-bold ${isHighYield ? 'text-green-600 dark:text-green-400' : 'text-slate-800 dark:text-slate-200'
-                        }`}>
-                        {fd.interest_rate_general}%
-                    </div>
-                    <span className="text-xs text-slate-500">p.a.</span>
                 </div>
             </div>
-
-            {/* Special features */}
-            {fd.special_features && Object.keys(fd.special_features).length > 0 && (
-                <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                    <p className="text-xs text-slate-500">
-                        {typeof fd.special_features === 'object'
-                            ? Object.values(fd.special_features).slice(0, 2).join(' • ')
-                            : String(fd.special_features)
-                        }
+            <div className="text-right">
+                <p className="font-mono font-bold text-green-400">
+                    {rate.rate_regular.toFixed(2)}%
+                </p>
+                {rate.rate_senior > rate.rate_regular && (
+                    <p className="text-[10px] text-muted-foreground">
+                        Senior: {rate.rate_senior.toFixed(2)}%
                     </p>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function FDRateSkeleton() {
+    return (
+        <div className="flex items-center justify-between py-2">
+            <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-4" />
+                <div className="space-y-1">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-20" />
                 </div>
-            )}
+            </div>
+            <Skeleton className="h-5 w-14" />
         </div>
     );
 }

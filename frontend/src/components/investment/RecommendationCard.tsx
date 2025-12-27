@@ -1,136 +1,118 @@
-/**
- * Individual recommendation card with action buttons.
- */
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Check, ExternalLink, Star } from 'lucide-react';
+import { useState } from "react";
+import { ChevronDown, ChevronUp, ExternalLink, Check } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { AllocationItem } from "@/lib/api/types";
 
-interface Suggestion {
-    asset_type: string;
-    instrument_name: string;
-    instrument_id: string;
-    amount: number;
-    percentage: number;
-    reason: string;
-    highlight?: string;
-    current_rate?: number;
+interface RecommendationCardProps {
+    allocation: AllocationItem;
+    className?: string;
 }
 
-interface Props {
-    suggestion: Suggestion;
-}
-
-const assetIcons: Record<string, string> = {
-    mutual_fund: '📊',
-    fd: '🏦',
-    gold: '🥇',
-    silver: '🥈',
-    etf: '📈',
-    bond: '📜',
+const categoryColors: Record<string, string> = {
+    equity: "bg-blue-500",
+    debt: "bg-green-500",
+    "fixed income": "bg-green-500",
+    gold: "bg-yellow-500",
+    emergency: "bg-purple-500",
+    hybrid: "bg-orange-500",
 };
 
-const assetColors: Record<string, string> = {
-    mutual_fund: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    fd: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-    gold: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
-    silver: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
-    etf: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-};
+export function RecommendationCard({
+    allocation,
+    className,
+}: RecommendationCardProps) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isMarkedDone, setIsMarkedDone] = useState(false);
 
-export function RecommendationCard({ suggestion }: Props) {
-    const [invested, setInvested] = useState(false);
-
-    const formatCurrency = (amount: number): string => {
-        return `₹${amount.toLocaleString('en-IN')}`;
-    };
-
-    const handleInvest = async () => {
-        // In production, this would open the investment flow or external link
-        setInvested(true);
-
-        // Record in backend
-        try {
-            await fetch('/api/v1/portfolio/holdings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: 1, // Get from auth
-                    asset_type: suggestion.asset_type,
-                    asset_identifier: suggestion.instrument_id,
-                    asset_name: suggestion.instrument_name,
-                    invested_amount: suggestion.amount,
-                    purchase_date: new Date().toISOString(),
-                }),
-            });
-        } catch (error) {
-            console.error('Failed to record investment:', error);
-        }
-    };
+    const bgColor = categoryColors[allocation.category.toLowerCase()] || "bg-gray-500";
 
     return (
-        <Card className={`border-l-4 ${invested ? 'border-l-green-500 bg-green-50/50' : 'border-l-blue-500'}`}>
-            <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1space-y-2">
-                        {/* Header */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-lg">
-                                {assetIcons[suggestion.asset_type] || '💰'}
-                            </span>
-                            <Badge className={assetColors[suggestion.asset_type] || 'bg-slate-100'}>
-                                {suggestion.asset_type.replace(/_/g, ' ')}
-                            </Badge>
-                            {suggestion.highlight && (
-                                <Badge variant="outline" className="text-amber-600 border-amber-300">
-                                    <Star className="h-3 w-3 mr-1 fill-amber-400" />
-                                    {suggestion.highlight}
-                                </Badge>
-                            )}
-                        </div>{/* Instrument name */}
-                        <h4 className="font-medium text-slate-800 dark:text-slate-200">
-                            {suggestion.instrument_name}
-                        </h4>
-
-                        {/* Amount and percentage */}
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-                                {formatCurrency(suggestion.amount)}
-                            </span>
-                            <span className="text-sm text-slate-500">
-                                ({suggestion.percentage.toFixed(0)}%)
-                            </span>
-                            {suggestion.current_rate && (
-                                <span className="text-sm text-green-600 font-medium">
-                                    @ {suggestion.current_rate}% p.a.
-                                </span>
+        <Card
+            className={cn(
+                "border-border transition-all",
+                isMarkedDone && "opacity-60",
+                className
+            )}
+        >
+            <CardContent className="py-3 px-4">
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="w-full text-left"
+                >
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div
+                                className={cn(
+                                    "h-10 w-10 rounded-lg flex items-center justify-center text-white font-bold text-sm",
+                                    bgColor
+                                )}
+                            >
+                                {allocation.percentage}%
+                            </div>
+                            <div>
+                                <p className={cn("font-medium", isMarkedDone && "line-through")}>
+                                    {allocation.name}
+                                </p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge variant="secondary" className="text-[10px]">
+                                        {allocation.category}
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">
+                                        {allocation.instrument_type}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <p className="font-mono font-semibold">
+                                ₹{allocation.amount.toLocaleString("en-IN")}
+                            </p>
+                            {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
                             )}
                         </div>
-
-                        {/* Reason */}
-                        <p className="text-sm text-slate-600 dark:text-slate-400">
-                            {suggestion.reason}
-                        </p>
                     </div>
+                </button>
 
-                    {/* Action */}
-                    <div className="flex flex-col gap-2">
-                        {invested ? (
-                            <Button disabled variant="outline" className="text-green-600">
-                                <Check className="h-4 w-4 mr-1" />
-                                Added
+                {isExpanded && (
+                    <div className="mt-4 pt-4 border-t border-border space-y-4">
+                        <p className="text-sm text-muted-foreground">{allocation.reason}</p>
+
+                        <div className="flex items-center justify-between gap-2">
+                            <Button
+                                variant={isMarkedDone ? "secondary" : "outline"}
+                                size="sm"
+                                onClick={() => setIsMarkedDone(!isMarkedDone)}
+                                className="gap-2"
+                            >
+                                <Check className={cn("h-4 w-4", isMarkedDone && "text-green-400")} />
+                                {isMarkedDone ? "Done" : "Mark as done"}
                             </Button>
-                        ) : (
-                            <Button onClick={handleInvest} size="sm">
-                                Invest
-                                <ExternalLink className="h-3 w-3 ml-1" />
-                            </Button>
-                        )}
+
+                            {allocation.action_url && (
+                                <Button size="sm" variant="outline" asChild>
+
+                                    <a href={allocation.action_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="gap-2"
+                                    >
+                                        {allocation.action_text || "Learn more"}
+                                        <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                </Button>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </CardContent>
-        </Card>);
+        </Card >
+    );
 }
