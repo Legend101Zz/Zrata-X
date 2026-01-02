@@ -1,149 +1,167 @@
-// ============ FD Rates ============
-export interface FDRate {
-  id: string;
+// ============ Market Data (matches backend) ============
+export interface MarketSnapshot {
+  repo_rate: number | null;
+  inflation_rate: number | null;
+  gold_price_per_gram: number | null;
+  silver_price_per_gram: number | null;
+  nifty_pe_ratio: number | null;
+  market_sentiment: string | null;
+  last_updated: string;
+}
+
+export interface FDRateResponse {
+  id: number;
   bank_name: string;
-  bank_type: "public" | "private" | "small_finance" | "cooperative";
-  tenure_months: number;
-  rate_regular: number;
-  rate_senior: number;
-  min_amount: number;
-  max_amount?: number;
-  special_rate?: number;
-  last_updated: string;
-  source_url?: string;
+  bank_type: string;
+  tenure_display: string;
+  interest_rate_general: number;
+  interest_rate_senior: number | null;
+  has_credit_card_offer: boolean;
+  special_features: Record<string, unknown> | null;
 }
 
-export interface FDRatesResponse {
-  rates: FDRate[];
-  last_scraped: string;
-  source: string;
+export interface MutualFundResponse {
+  scheme_code: string;
+  scheme_name: string;
+  amc_name: string;
+  category: string;
+  plan_type: string;
+  nav: number;
+  nav_date: string | null;
+  return_1y: number | null;
+  expense_ratio: number | null;
 }
 
-// ============ Market Data ============
-export interface InflationData {
-  month: string;
-  cpi: number;
-  food_inflation: number;
-  core_inflation: number;
-  yoy_change: number;
-}
-
-export interface IndexData {
+export interface ETFResponse {
+  symbol: string;
   name: string;
-  value: number;
-  change_1d: number;
-  change_1w: number;
-  change_1m: number;
-  change_ytd: number;
-  last_updated: string;
+  underlying: string;
+  nav: number;
+  market_price: number;
+  premium_discount: number;
+  expense_ratio: number | null;
 }
 
-export interface GoldPrice {
+export interface GoldPriceResponse {
+  metal_type: string;
   price_per_gram: number;
   price_per_10g: number;
-  change_1d: number;
-  change_1m: number;
-  last_updated: string;
+  recorded_at: string;
 }
 
-export interface MarketDataResponse {
-  inflation: InflationData;
-  indices: IndexData[];
-  gold: GoldPrice;
-  repo_rate: number;
-  last_updated: string;
+export interface MacroIndicatorResponse {
+  indicator_name: string;
+  value: number;
+  previous_value: number | null;
+  change_percent: number | null;
+  unit: string;
+  recorded_at: string;
 }
 
-// ============ Portfolio ============
+export interface NewsResponse {
+  id: number;
+  title: string;
+  summary: string | null;
+  source: string;
+  url: string;
+  published_at: string;
+  sentiment_score: number | null;
+  categories: string[];
+}
+
+// ============ Portfolio (matches backend) ============
 export interface Holding {
-  id: string;
-  user_id: string;
-  name: string;
-  type:
-    | "mutual_fund"
-    | "fd"
-    | "stock"
-    | "gold"
-    | "ppf"
-    | "epf"
-    | "nps"
-    | "bond";
+  id: number;
+  asset_type: string;
+  asset_identifier: string;
+  asset_name: string;
+  invested_amount: number;
   current_value: number;
-  invested_value: number;
-  units?: number;
-  purchase_date?: string;
-  maturity_date?: string;
-  interest_rate?: number;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
+  units: number | null;
+  gain_loss: number;
+  gain_loss_percent: number;
+  purchase_date: string;
 }
 
 export interface PortfolioSummary {
-  total_value: number;
   total_invested: number;
-  total_returns: number;
-  returns_percentage: number;
-  holdings_count: number;
-  allocation: {
-    category: string;
-    value: number;
-    percentage: number;
-  }[];
+  total_current_value: number;
+  total_gain_loss: number;
+  total_gain_loss_percent: number;
+  allocation: Record<
+    string,
+    { invested: number; current: number; percent: number }
+  >;
 }
 
 export interface CreateHoldingInput {
-  name: string;
-  type: Holding["type"];
-  current_value: number;
-  invested_value?: number;
+  asset_type: string;
+  asset_identifier: string;
+  asset_name: string;
+  invested_amount: number;
   units?: number;
-  purchase_date?: string;
-  maturity_date?: string;
+  purchase_date: string;
   interest_rate?: number;
+  maturity_date?: string;
   notes?: string;
 }
 
-// ============ Allocation ============
-export interface AllocationRequest {
+// ============ Recommendations (matches backend) ============
+export interface RecommendationRequest {
   amount: number;
-  risk_profile?: "conservative" | "moderate" | "aggressive";
-  existing_holdings?: Holding[];
-  goals?: string[];
+  risk_override?: string;
+  avoid_lock_ins?: boolean;
+  prefer_tax_saving?: boolean;
+  include_fds?: boolean;
+  include_gold?: boolean;
 }
 
-export interface AllocationItem {
-  id: string;
-  category: string;
-  instrument_type: string;
-  name: string;
+export interface GuestRecommendationRequest {
+  amount: number;
+  risk_profile?: "conservative" | "moderate" | "aggressive";
+  avoid_lock_ins?: boolean;
+  prefer_tax_saving?: boolean;
+  include_fds?: boolean;
+  include_gold?: boolean;
+}
+
+export interface SuggestionItem {
+  asset_type: string;
+  instrument_name: string;
+  instrument_id: string;
   amount: number;
   percentage: number;
   reason: string;
-  action_text?: string;
-  action_url?: string;
-  priority: number;
+  highlight?: string;
+  current_rate?: number;
 }
 
-export interface AllocationResponse {
-  allocations: AllocationItem[];
-  total_amount: number;
-  risk_profile: string;
-  market_context: {
-    inflation: number;
-    top_fd_rate: number;
-    nifty_pe: number;
-  };
-  generated_at: string;
+export interface RecommendationResponse {
+  id: number;
+  suggestions: SuggestionItem[];
+  summary: string;
+  risk_note: string;
+  tax_note?: string;
+  market_context: Record<string, unknown>;
+  valid_until: string;
+}
+
+export interface GuestRecommendationResponse {
+  suggestions: SuggestionItem[];
+  summary: string;
+  risk_note: string;
+  tax_note?: string;
+  market_context: Record<string, unknown>;
   disclaimer: string;
+  generated_at: string;
 }
 
-// ============ Auth ============
+// ============ Auth (matches backend) ============
 export interface User {
-  id: string;
+  id: number;
   email: string;
   name: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface LoginInput {
@@ -158,6 +176,7 @@ export interface SignupInput {
 }
 
 export interface AuthResponse {
+  access_token: string;
+  token_type: string;
   user: User;
-  token: string;
 }

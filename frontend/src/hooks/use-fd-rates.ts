@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { fdRatesApi, FDRatesFilters } from "@/lib/api/fd-rates";
+import { fdRatesApi, FDRatesFilters, FDRateResponse } from "@/lib/api/fd-rates";
 
 export const fdRatesKeys = {
   all: ["fd-rates"] as const,
   list: (filters?: FDRatesFilters) =>
     [...fdRatesKeys.all, "list", filters] as const,
   top: (limit?: number) => [...fdRatesKeys.all, "top", limit] as const,
-  bank: (name: string) => [...fdRatesKeys.all, "bank", name] as const,
+  smallFinance: (limit?: number) =>
+    [...fdRatesKeys.all, "small-finance", limit] as const,
+  withCreditCard: (limit?: number) =>
+    [...fdRatesKeys.all, "credit-card", limit] as const,
 };
 
 export function useFDRates(filters?: FDRatesFilters) {
@@ -25,10 +28,18 @@ export function useTopFDRates(limit = 5) {
   });
 }
 
-export function useFDRatesByBank(bankName: string) {
+export function useSmallFinanceBankRates(limit = 10) {
   return useQuery({
-    queryKey: fdRatesKeys.bank(bankName),
-    queryFn: () => fdRatesApi.getByBank(bankName),
-    enabled: !!bankName,
+    queryKey: fdRatesKeys.smallFinance(limit),
+    queryFn: () => fdRatesApi.getSmallFinanceBanks(limit),
+    staleTime: 1000 * 60 * 60,
+  });
+}
+
+export function useFDsWithCreditCard(limit = 10) {
+  return useQuery({
+    queryKey: fdRatesKeys.withCreditCard(limit),
+    queryFn: () => fdRatesApi.getWithCreditCard(limit),
+    staleTime: 1000 * 60 * 60,
   });
 }

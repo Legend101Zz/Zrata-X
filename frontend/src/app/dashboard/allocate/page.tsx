@@ -5,117 +5,103 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
     ArrowLeft,
-    Check,
-    IndianRupee,
     Info,
     RefreshCw,
     ChevronDown,
     ChevronUp,
     ExternalLink,
+    AlertCircle,
+    TrendingUp,
+    Building2,
+    Coins,
+    Banknote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
+import { useRecommendation } from "@/hooks/use-recommendations";
+import { useAuthStore } from "@/lib/store/auth-store";
+import type {
+    SuggestionItem,
+    RecommendationResponse,
+    GuestRecommendationResponse,
+} from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 
-interface AllocationItem {
-    id: string;
-    category: string;
-    name: string;
-    amount: number;
-    percentage: number;
-    reason: string;
-    action?: string;
-    link?: string;
-}
+type RecommendationData = RecommendationResponse | GuestRecommendationResponse;
 
 export default function AllocatePage() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const amount = parseFloat(searchParams.get("amount") || "0");
-    const [isLoading, setIsLoading] = useState(true);
-    const [allocations, setAllocations] = useState<AllocationItem[]>([]);
-    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const riskProfile =
+        (searchParams.get("risk") as "conservative" | "moderate" | "aggressive") ||
+        "moderate";
 
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [recommendationData, setRecommendationData] =
+        useState<RecommendationData | null>(null);
+
+    const { isAuthenticated } = useAuthStore();
+    const {
+        mutate: getRecommendation,
+        isPending,
+        isError,
+        error,
+    } = useRecommendation();
+
+    // Fetch recommendation on mount
     useEffect(() => {
         if (!amount || amount <= 0) {
             router.push("/dashboard");
             return;
         }
 
-        // Simulate API call for allocation suggestions
-        // TODO: Replace with actual API call to backend
-        const fetchAllocations = async () => {
-            setIsLoading(true);
-            await new Promise((resolve) => setTimeout(resolve, 1500));
+        getRecommendation(
+            {
+                amount,
+                risk_profile: riskProfile,
+                include_fds: true,
+                include_gold: true,
+            },
+            {
+                onSuccess: (data) => {
+                    setRecommendationData(data);
+                },
+            }
+        );
+    }, [amount, riskProfile, getRecommendation, router]);
 
-            // Mock allocation logic (replace with actual backend calculation)
-            const mockAllocations: AllocationItem[] = [
+    const handleRecalculate = () => {
+        if (amount > 0) {
+            getRecommendation(
                 {
-                    id: "1",
-                    category: "Fixed Income",
-                    name: "Unity Small Finance Bank FD",
-                    amount: Math.round(amount * 0.3),
-                    percentage: 30,
-                    reason:
-                        "Highest FD rate at 8.5% for 1 year. Good for capital preservation with inflation-beating returns.",
-                    action: "Open FD online",
-                    link: "https://unitysmallfinancebank.com",
+                    amount,
+                    risk_profile: riskProfile,
+                    include_fds: true,
+                    include_gold: true,
                 },
                 {
-                    id: "2",
-                    category: "Equity",
-                    name: "Nifty 50 Index Fund",
-                    amount: Math.round(amount * 0.35),
-                    percentage: 35,
-                    reason:
-                        "Low-cost exposure to top 50 companies. Long-term wealth building with market returns.",
-                    action: "Buy via your broker",
-                },
-                {
-                    id: "3",
-                    category: "Equity",
-                    name: "Nifty Next 50 Index Fund",
-                    amount: Math.round(amount * 0.15),
-                    percentage: 15,
-                    reason:
-                        "Exposure to emerging large-caps. Higher growth potential with slightly more volatility.",
-                    action: "Buy via your broker",
-                },
-                {
-                    id: "4",
-                    category: "Gold",
-                    name: "Sovereign Gold Bond",
-                    amount: Math.round(amount * 0.1),
-                    percentage: 10,
-                    reason:
-                        "2.5% interest + gold appreciation. Tax-free if held to maturity. Hedge against uncertainty.",
-                    action: "Buy during RBI issue window",
-                },
-                {
-                    id: "5",
-                    category: "Emergency",
-                    name: "Liquid Fund",
-                    amount: Math.round(amount * 0.1),
-                    percentage: 10,
-                    reason:
-                        "Instant redemption available. Better than savings account. Park for emergencies.",
-                    action: "Buy via any AMC",
-                },
-            ];
-
-            setAllocations(mockAllocations);
-            setIsLoading(false);
-        };
-
-        fetchAllocations();
-    }, [amount, router]);
+                    onSuccess: (data) => {
+                        setRecommendationData(data);
+                    },
+                }
+            );
+        }
+    };
 
     if (!amount || amount <= 0) {
         return null;
     }
+
+    const suggestions = recommendationData?.suggestions || [];
+    const marketContext = recommendationData?.market_context;
+    const disclaimer =
+        "disclaimer" in (recommendationData || {})
+            ? (recommendationData as GuestRecommendationResponse).disclaimer
+            : "This is educational information, not investment advice.";
 
     return (
         <div className="space-y-6">
@@ -128,7 +114,7 @@ export default function AllocatePage() {
                 <div>
                     <Link
                         href="/dashboard"
-                        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4 transition-gentle"
+                        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
                     >
                         <ArrowLeft className="h-4 w-4 mr-1" />
                         Back
@@ -144,15 +130,46 @@ export default function AllocatePage() {
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => window.location.reload()}
+                    onClick={handleRecalculate}
+                    disabled={isPending}
                     className="hidden sm:flex"
                 >
-                    <RefreshCw className="h-4 w-4 mr-2" />
+                    <RefreshCw
+                        className={cn("h-4 w-4 mr-2", isPending && "animate-spin")}
+                    />
                     Recalculate
                 </Button>
             </motion.div>
 
-            {/* Summary Card */}
+            {/* Summary & Risk Note */}
+            {recommendationData && !isPending && (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.05 }}
+                    className="space-y-3"
+                >
+                    {recommendationData.summary && (
+                        <Card className="border-border bg-secondary/30">
+                            <CardContent className="py-4">
+                                <p className="text-sm">{recommendationData.summary}</p>
+                            </CardContent>
+                        </Card>
+                    )}
+                    {recommendationData.risk_note && (
+                        <Card className="border-border bg-amber-500/10 border-amber-500/20">
+                            <CardContent className="py-3 flex items-start gap-2">
+                                <Info className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                                <p className="text-sm text-amber-200/80">
+                                    {recommendationData.risk_note}
+                                </p>
+                            </CardContent>
+                        </Card>
+                    )}
+                </motion.div>
+            )}
+
+            {/* Allocation Breakdown Bar */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -165,42 +182,76 @@ export default function AllocatePage() {
                                 Allocation Breakdown
                             </p>
                             <div className="flex h-3 rounded-full overflow-hidden bg-secondary">
-                                {!isLoading &&
-                                    allocations.map((item, i) => (
+                                {!isPending &&
+                                    suggestions.map((item, i) => (
                                         <div
-                                            key={item.id}
-                                            className={`h-full ${getCategoryColor(item.category)}`}
+                                            key={`${item.instrument_id}-${i}`}
+                                            className={`h-full ${getAssetColor(item.asset_type)}`}
                                             style={{ width: `${item.percentage}%` }}
                                         />
                                     ))}
+                                {isPending && (
+                                    <div className="h-full w-full bg-secondary animate-pulse" />
+                                )}
                             </div>
                         </div>
                         <div className="p-4 flex flex-wrap gap-4">
-                            {!isLoading &&
-                                [...new Set(allocations.map((a) => a.category))].map((cat) => (
-                                    <div key={cat} className="flex items-center gap-2 text-sm">
-                                        <div
-                                            className={`h-3 w-3 rounded ${getCategoryColor(cat)}`}
-                                        />
-                                        <span className="text-muted-foreground">{cat}</span>
-                                        <span className="font-mono">
-                                            {allocations
-                                                .filter((a) => a.category === cat)
-                                                .reduce((sum, a) => sum + a.percentage, 0)}
-                                            %
-                                        </span>
-                                    </div>
-                                ))}
+                            {!isPending &&
+                                [...new Set(suggestions.map((s) => s.asset_type))].map(
+                                    (type) => (
+                                        <div key={type} className="flex items-center gap-2 text-sm">
+                                            <div
+                                                className={`h-3 w-3 rounded ${getAssetColor(type)}`}
+                                            />
+                                            <span className="text-muted-foreground capitalize">
+                                                {type.replace("_", " ")}
+                                            </span>
+                                            <span className="font-mono">
+                                                {suggestions
+                                                    .filter((s) => s.asset_type === type)
+                                                    .reduce((sum, s) => sum + s.percentage, 0)
+                                                    .toFixed(0)}
+                                                %
+                                            </span>
+                                        </div>
+                                    )
+                                )}
                         </div>
                     </CardContent>
                 </Card>
             </motion.div>
 
-            {/* Allocation Items */}
+            {/* Error State */}
+            {isError && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                    <Card className="border-destructive/50 bg-destructive/10">
+                        <CardContent className="py-4 flex items-center gap-3">
+                            <AlertCircle className="h-5 w-5 text-destructive" />
+                            <div>
+                                <p className="font-medium text-destructive">
+                                    Failed to generate recommendations
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    {error?.message || "Please try again later."}
+                                </p>
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRecalculate}
+                                className="ml-auto"
+                            >
+                                Retry
+                            </Button>
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            )}
+
+            {/* Suggestion Items */}
             <div className="space-y-3">
-                {isLoading ? (
-                    // Loading skeletons
-                    [...Array(4)].map((_, i) => (
+                {isPending
+                    ? [...Array(4)].map((_, i) => (
                         <Card key={i} className="border-border">
                             <CardContent className="py-4">
                                 <div className="flex items-center gap-4">
@@ -214,23 +265,25 @@ export default function AllocatePage() {
                             </CardContent>
                         </Card>
                     ))
-                ) : (
-                    allocations.map((item, index) => (
-                        <AllocationCard
-                            key={item.id}
+                    : suggestions.map((item, index) => (
+                        <SuggestionCard
+                            key={`${item.instrument_id}-${index}`}
                             item={item}
-                            isExpanded={expandedId === item.id}
+                            isExpanded={expandedId === `${item.instrument_id}-${index}`}
                             onToggle={() =>
-                                setExpandedId(expandedId === item.id ? null : item.id)
+                                setExpandedId(
+                                    expandedId === `${item.instrument_id}-${index}`
+                                        ? null
+                                        : `${item.instrument_id}-${index}`
+                                )
                             }
                             delay={index * 0.1}
                         />
-                    ))
-                )}
+                    ))}
             </div>
 
             {/* Action Section */}
-            {!isLoading && (
+            {!isPending && suggestions.length > 0 && (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -246,9 +299,8 @@ export default function AllocatePage() {
                                         What's next?
                                     </p>
                                     <p className="text-muted-foreground">
-                                        These are suggestions based on current market data. Execute
-                                        through your preferred broker or bank. Zrata-X doesn't hold
-                                        your money — you're always in control.
+                                        Execute through your preferred broker or bank. Zrata-X
+                                        doesn't hold your money — you're always in control.
                                     </p>
                                 </div>
                             </div>
@@ -256,10 +308,7 @@ export default function AllocatePage() {
                     </Card>
 
                     <div className="flex justify-center">
-                        <Button
-                            variant="outline"
-                            onClick={() => router.push("/dashboard")}
-                        >
+                        <Button variant="outline" onClick={() => router.push("/dashboard")}>
                             Start Fresh
                         </Button>
                     </div>
@@ -268,24 +317,25 @@ export default function AllocatePage() {
 
             {/* Disclaimer */}
             <p className="text-xs text-muted-foreground text-center pt-4">
-                This is educational information, not investment advice. Please consult
-                a financial advisor for personalized recommendations.
+                {disclaimer}
             </p>
         </div>
     );
 }
 
-function AllocationCard({
+function SuggestionCard({
     item,
     isExpanded,
     onToggle,
     delay,
 }: {
-    item: AllocationItem;
+    item: SuggestionItem;
     isExpanded: boolean;
     onToggle: () => void;
     delay: number;
 }) {
+    const Icon = getAssetIcon(item.asset_type);
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -293,36 +343,53 @@ function AllocationCard({
             transition={{ delay }}
         >
             <Card
-                className={`border-border transition-gentle ${isExpanded ? "bg-secondary/30" : "bg-card hover:bg-secondary/20"
-                    }`}
+                className={cn(
+                    "border-border transition-colors",
+                    isExpanded ? "bg-secondary/30" : "bg-card hover:bg-secondary/20"
+                )}
             >
                 <CardContent className="py-4">
-                    <button
-                        onClick={onToggle}
-                        className="w-full text-left focus:outline-none"
-                    >
+                    <button onClick={onToggle} className="w-full text-left">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-4">
                                 <div
-                                    className={`h-10 w-10 rounded-lg flex items-center justify-center ${getCategoryColor(
-                                        item.category
+                                    className={`h-10 w-10 rounded-lg flex items-center justify-center ${getAssetColor(
+                                        item.asset_type
                                     )}`}
                                 >
-                                    <span className="text-white font-bold text-sm">
-                                        {item.percentage}%
-                                    </span>
+                                    <Icon className="h-5 w-5 text-white" />
                                 </div>
                                 <div>
-                                    <p className="font-medium">{item.name}</p>
-                                    <Badge variant="secondary" className="text-xs mt-1">
-                                        {item.category}
-                                    </Badge>
+                                    <p className="font-medium">{item.instrument_name}</p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        <Badge variant="secondary" className="text-xs capitalize">
+                                            {item.asset_type.replace("_", " ")}
+                                        </Badge>
+                                        {item.current_rate && (
+                                            <span className="text-xs text-green-400">
+                                                {item.current_rate}% p.a.
+                                            </span>
+                                        )}
+                                        {item.highlight && (
+                                            <Badge
+                                                variant="outline"
+                                                className="text-xs border-amber-500/50 text-amber-400"
+                                            >
+                                                {item.highlight}
+                                            </Badge>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <p className="font-mono font-semibold text-right">
-                                    ₹{item.amount.toLocaleString("en-IN")}
-                                </p>
+                            <div className="flex items-center gap-4">
+                                <div className="text-right">
+                                    <p className="font-mono font-semibold">
+                                        ₹{item.amount.toLocaleString("en-IN")}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {item.percentage.toFixed(0)}%
+                                    </p>
+                                </div>
                                 {isExpanded ? (
                                     <ChevronUp className="h-5 w-5 text-muted-foreground" />
                                 ) : (
@@ -339,46 +406,45 @@ function AllocationCard({
                             exit={{ opacity: 0, height: 0 }}
                             className="mt-4 pt-4 border-t border-border"
                         >
-                            <p className="text-sm text-muted-foreground mb-4">{item.reason}</p>
-                            {item.action && (
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-muted-foreground">
-                                        {item.action}
-                                    </span>
-                                    {item.link && (
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="gap-2"
-                                            asChild
-                                        >
-
-                                            <a href={item.link}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                            >
-                                                Visit
-                                                <ExternalLink className="h-3 w-3" />
-                                            </a>
-                                        </Button>
-                                    )}
-                                </div>
-                            )}
+                            <p className="text-sm text-muted-foreground">{item.reason}</p>
                         </motion.div>
                     )}
                 </CardContent>
             </Card>
-        </motion.div >
+        </motion.div>
     );
 }
 
-function getCategoryColor(category: string): string {
+function getAssetColor(assetType: string): string {
     const colors: Record<string, string> = {
-        "Fixed Income": "bg-green-500",
-        Equity: "bg-blue-500",
-        Gold: "bg-yellow-500",
-        Emergency: "bg-purple-500",
-        Debt: "bg-teal-500",
+        mutual_fund: "bg-blue-500",
+        equity: "bg-blue-500",
+        fixed_deposit: "bg-green-500",
+        fd: "bg-green-500",
+        gold: "bg-yellow-500",
+        silver: "bg-gray-400",
+        debt: "bg-teal-500",
+        bond: "bg-teal-500",
+        liquid: "bg-purple-500",
+        ppf: "bg-orange-500",
+        nps: "bg-indigo-500",
     };
-    return colors[category] || "bg-gray-500";
+    return colors[assetType.toLowerCase()] || "bg-gray-500";
+}
+
+function getAssetIcon(assetType: string) {
+    const icons: Record<string, typeof TrendingUp> = {
+        mutual_fund: TrendingUp,
+        equity: TrendingUp,
+        fixed_deposit: Building2,
+        fd: Building2,
+        gold: Coins,
+        silver: Coins,
+        debt: Banknote,
+        bond: Banknote,
+        liquid: Banknote,
+        ppf: Banknote,
+        nps: Banknote,
+    };
+    return icons[assetType.toLowerCase()] || TrendingUp;
 }

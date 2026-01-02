@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useAuthStore } from "@/lib/store/auth-store";
-import { Mail, Lock, ArrowRight, Sparkles } from "lucide-react";
+import { useLogin, useSignup } from "@/hooks/use-auth";
+import { Mail, Lock, ArrowRight, Sparkles, Loader2, User } from "lucide-react";
 
 interface LoginDialogProps {
     open: boolean;
@@ -26,33 +27,57 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
-    const [isLoading, setIsLoading] = useState(false);
-    const { setUser, setGuest } = useAuthStore();
+
+    const { setGuest } = useAuthStore();
     const router = useRouter();
+
+    // Use real auth hooks
+    const loginMutation = useLogin();
+    const signupMutation = useSignup();
+
+    const isLoading = loginMutation.isPending || signupMutation.isPending;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
 
-        // TODO: Replace with actual API call
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Mock successful login
-        setUser({
-            id: "1",
-            email,
-            name: name || email.split("@")[0],
-        });
-
-        setIsLoading(false);
-        onOpenChange(false);
-        router.push("/dashboard");
+        if (isLogin) {
+            loginMutation.mutate(
+                { email, password },
+                {
+                    onSuccess: () => {
+                        onOpenChange(false);
+                        resetForm();
+                    },
+                }
+            );
+        } else {
+            signupMutation.mutate(
+                { email, password, name },
+                {
+                    onSuccess: () => {
+                        onOpenChange(false);
+                        resetForm();
+                    },
+                }
+            );
+        }
     };
 
     const handleContinueAsGuest = () => {
         setGuest();
         onOpenChange(false);
         router.push("/dashboard");
+    };
+
+    const resetForm = () => {
+        setEmail("");
+        setPassword("");
+        setName("");
+    };
+
+    const toggleMode = () => {
+        setIsLogin(!isLogin);
+        resetForm();
     };
 
     return (
@@ -79,13 +104,18 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                     {!isLogin && (
                         <div className="space-y-2">
                             <Label htmlFor="name">Name</Label>
-                            <Input
-                                id="name"
-                                placeholder="Your name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                className="bg-background border-border"
-                            />
+                            <div className="relative">
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    id="name"
+                                    placeholder="Your name"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="pl-10 bg-background border-border"
+                                    required={!isLogin}
+                                    disabled={isLoading}
+                                />
+                            </div>
                         </div>
                     )}
 
@@ -101,6 +131,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="pl-10 bg-background border-border"
                                 required
+                                disabled={isLoading}
                             />
                         </div>
                     </div>
@@ -117,6 +148,8 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="pl-10 bg-background border-border"
                                 required
+                                minLength={6}
+                                disabled={isLoading}
                             />
                         </div>
                     </div>
@@ -127,10 +160,13 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                         disabled={isLoading}
                     >
                         {isLoading ? (
-                            "Please wait..."
+                            <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                {isLogin ? "Signing in..." : "Creating account..."}
+                            </>
                         ) : (
                             <>
-                                {isLogin ? "Sign In" : "Create Account"}
+                                {isLogin ? "Sign in" : "Create account"}
                                 <ArrowRight className="ml-2 h-4 w-4" />
                             </>
                         )}
@@ -148,38 +184,19 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                     variant="outline"
                     className="w-full"
                     onClick={handleContinueAsGuest}
+                    disabled={isLoading}
                 >
                     <Sparkles className="mr-2 h-4 w-4" />
-                    Continue without account
+                    Continue as Guest
                 </Button>
 
-                {/* Benefits of signing in */}
-                <div className="mt-4 p-4 rounded-lg bg-secondary/30 border border-border">
-                    <p className="text-xs text-muted-foreground mb-2 font-medium">
-                        Why sign in?
-                    </p>
-                    <ul className="text-xs text-muted-foreground space-y-1">
-                        <li className="flex items-center gap-2">
-                            <span className="h-1 w-1 rounded-full bg-primary" />
-                            Track your portfolio across sessions
-                        </li>
-                        <li className="flex items-center gap-2">
-                            <span className="h-1 w-1 rounded-full bg-primary" />
-                            Get smarter suggestions over time
-                        </li>
-                        <li className="flex items-center gap-2">
-                            <span className="h-1 w-1 rounded-full bg-primary" />
-                            Your data stays private
-                        </li>
-                    </ul>
-                </div>
-
-                <p className="text-center text-sm text-muted-foreground">
+                <p className="text-center text-sm text-muted-foreground mt-4">
                     {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
                     <button
                         type="button"
-                        onClick={() => setIsLogin(!isLogin)}
-                        className="text-primary hover:underline"
+                        onClick={toggleMode}
+                        className="text-primary hover:underline font-medium"
+                        disabled={isLoading}
                     >
                         {isLogin ? "Sign up" : "Sign in"}
                     </button>

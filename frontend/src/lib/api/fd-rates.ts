@@ -1,26 +1,43 @@
 import { api } from "./client";
-import { FDRate, FDRatesResponse } from "./types";
+
+// Response type matching backend FDRateResponse schema
+export interface FDRateResponse {
+  id: number;
+  bank_name: string;
+  bank_type: string;
+  tenure_display: string;
+  interest_rate_general: number;
+  interest_rate_senior: number | null;
+  has_credit_card_offer: boolean;
+  special_features: Record<string, unknown> | null;
+}
 
 export interface FDRatesFilters {
-  bank_type?: string;
-  min_tenure?: number;
-  max_tenure?: number;
+  bank_type?: "small_finance" | "private" | "public";
   min_rate?: number;
-  sort_by?: "rate" | "tenure" | "bank_name";
-  sort_order?: "asc" | "desc";
+  tenure_days?: number;
+  with_credit_card?: boolean;
   limit?: number;
 }
 
 export const fdRatesApi = {
+  // Get FD rates with filters (sorted by rate desc by default)
   getAll: (filters?: FDRatesFilters) =>
-    api.get<FDRatesResponse>("/api/v1/fd-rates", { params: filters }),
+    api.get<FDRateResponse[]>("/api/v1/market/fd-rates", { params: filters }),
 
+  // Get top N FD rates (convenience method)
   getTop: (limit = 5) =>
-    api.get<FDRate[]>("/api/v1/fd-rates/top", { params: { limit } }),
+    api.get<FDRateResponse[]>("/api/v1/market/fd-rates", { params: { limit } }),
 
-  getByBank: (bankName: string) =>
-    api.get<FDRate[]>(`/api/v1/fd-rates/bank/${encodeURIComponent(bankName)}`),
+  // Get best small finance bank rates
+  getSmallFinanceBanks: (limit = 10) =>
+    api.get<FDRateResponse[]>("/api/v1/market/fd-rates", {
+      params: { bank_type: "small_finance", limit },
+    }),
 
-  compare: (bankNames: string[]) =>
-    api.post<FDRate[]>("/api/v1/fd-rates/compare", { banks: bankNames }),
+  // Get FDs with credit card offers
+  getWithCreditCard: (limit = 10) =>
+    api.get<FDRateResponse[]>("/api/v1/market/fd-rates", {
+      params: { with_credit_card: true, limit },
+    }),
 };

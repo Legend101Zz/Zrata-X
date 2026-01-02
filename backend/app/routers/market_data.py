@@ -1,6 +1,7 @@
 """
 Market data API routes - provides current market snapshot and historical data.
 """
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -16,17 +17,19 @@ from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/market", tags=["Market Data"])
 
 
 # Pydantic Schemas
 class MarketSnapshot(BaseModel):
-    repo_rate: Optional[float]
-    inflation_rate: Optional[float]
-    gold_price_per_gram: Optional[float]
-    silver_price_per_gram: Optional[float]
-    nifty_pe_ratio: Optional[float]
-    market_sentiment: Optional[str]
+    repo_rate: Optional[float] = None
+    inflation_rate: Optional[float] = None
+    gold_price_per_gram: Optional[float] = None
+    silver_price_per_gram: Optional[float] = None
+    nifty_pe_ratio: Optional[float] = None
+    market_sentiment: Optional[str] = None
     last_updated: datetime
 
 
@@ -36,9 +39,9 @@ class FDRateResponse(BaseModel):
     bank_type: str
     tenure_display: str
     interest_rate_general: float
-    interest_rate_senior: Optional[float]
+    interest_rate_senior: Optional[float] = None
     has_credit_card_offer: bool
-    special_features: Optional[dict]
+    special_features: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -51,9 +54,9 @@ class MutualFundResponse(BaseModel):
     category: str
     plan_type: str
     nav: float
-    nav_date: Optional[datetime]
-    return_1y: Optional[float]
-    expense_ratio: Optional[float]
+    nav_date: Optional[datetime] = None
+    return_1y: Optional[float] = None
+    expense_ratio: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -66,7 +69,7 @@ class ETFResponse(BaseModel):
     nav: float
     market_price: float
     premium_discount: float
-    expense_ratio: Optional[float]
+    expense_ratio: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -85,12 +88,12 @@ class GoldPriceResponse(BaseModel):
 class NewsResponse(BaseModel):
     id: int
     title: str
-    summary: Optional[str]
+    summary: Optional[str] = None
     source: str
     url: str
     published_at: datetime
-    sentiment_score: Optional[float]
-    categories: List[str]
+    sentiment_score: Optional[float] = None
+    categories: List[str] = []
 
     class Config:
         from_attributes = True
@@ -99,8 +102,8 @@ class NewsResponse(BaseModel):
 class MacroIndicatorResponse(BaseModel):
     indicator_name: str
     value: float
-    previous_value: Optional[float]
-    change_percent: Optional[float]
+    previous_value: Optional[float] = None
+    change_percent: Optional[float] = None
     unit: str
     recorded_at: datetime
 
@@ -108,13 +111,48 @@ class MacroIndicatorResponse(BaseModel):
         from_attributes = True
 
 
+def _extract_sentiment(sentiment_data) -> Optional[str]:
+    """Extract sentiment string from sentiment data (could be dict or string)."""
+    if sentiment_data is None:
+        return None
+    if isinstance(sentiment_data, str):
+        return sentiment_data
+    if isinstance(sentiment_data, dict):
+        return sentiment_data.get("overall")
+    return None
+
+
 # Routes
 @router.get("/snapshot", response_model=MarketSnapshot)
 async def get_market_snapshot(db: AsyncSession = Depends(get_db)):
     """Get current market snapshot with key indicators."""
-    aggregator = MarketDataAggregator(db)
-    snapshot = await aggregator.get_current_market_snapshot()
-    return MarketSnapshot(**snapshot, last_updated=datetime.utcnow())
+    try:
+        aggregator = MarketDataAggregator(db)
+        snapshot = await aggregator.get_current_market_snapshot()
+        
+        # Map aggregator response to MarketSnapshot schema
+        # The aggregator returns different key names than what the schema expects
+        return MarketSnapshot(
+            repo_rate=snapshot.get("repo_rate"),
+            inflation_rate=snapshot.get("inflation_cpi") or snapshot.get("inflation_rate"),
+            gold_price_per_gram=snapshot.get("gold_price_per_gram"),
+            silver_price_per_gram=snapshot.get("silver_price_per_gram"),
+            nifty_pe_ratio=snapshot.get("nifty50_pe_ratio") or snapshot.get("nifty_pe_ratio"),
+            market_sentiment=_extract_sentiment(snapshot.get("market_sentiment")),
+            last_updated=datetime.utcnow()
+        )
+    except Exception as e:
+        # Log the error and return empty snapshot rather than 500
+        logger.error(f"Error fetching market snapshot: {e}", exc_info=True)
+        return MarketSnapshot(
+            repo_rate=None,
+            inflation_rate=None,
+            gold_price_per_gram=None,
+            silver_price_per_gram=None,
+            nifty_pe_ratio=None,
+            market_sentiment=None,
+            last_updated=datetime.utcnow()
+        )
 
 
 @router.get("/fd-rates", response_model=List[FDRateResponse])
@@ -251,22 +289,20 @@ async def get_digital_gold_providers(db: AsyncSession = Depends(get_db)):
 @router.get("/macro-indicators", response_model=List[MacroIndicatorResponse])
 async def get_macro_indicators(db: AsyncSession = Depends(get_db)):
     """Get current macro economic indicators."""
-    # Get latest value for each indicator
-    subquery = (
-        select(
-            MacroIndicator.indicator_name,
-            MacroIndicator.value,
-            MacroIndicator.previous_value,
-            MacroIndicator.change_percent,
-            MacroIndicator.unit,
-            MacroIndicator.recorded_at
-        )
-        .distinct(MacroIndicator.indicator_name)
-        .order_by(MacroIndicator.indicator_name, desc(MacroIndicator.recorded_at))
+    # Get latest value for each indicator - simplified query
+    result = await db.execute(
+        select(MacroIndicator)
+        .order_by(desc(MacroIndicator.recorded_at))
+        .limit(50)
     )
     
-    result = await db.execute(subquery)
-    return result.all()
+    # Deduplicate by indicator name, keeping only latest
+    indicators = {}
+    for ind in result.scalars().all():
+        if ind.indicator_name not in indicators:
+            indicators[ind.indicator_name] = ind
+    
+    return list(indicators.values())
 
 
 @router.get("/news", response_model=List[NewsResponse])

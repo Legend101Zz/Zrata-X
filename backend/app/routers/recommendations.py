@@ -49,6 +49,26 @@ class RecommendationResponse(BaseModel):
     valid_until: datetime
 
 
+class GuestInvestmentInput(BaseModel):
+    """Simplified input for guest users without portfolio context."""
+    amount: float = Field(..., gt=0, le=10000000)
+    risk_profile: Optional[str] = "moderate"  # conservative, moderate, aggressive
+    avoid_lock_ins: bool = False
+    prefer_tax_saving: bool = False
+    include_fds: bool = True
+    include_gold: bool = True
+
+
+class GuestRecommendationResponse(BaseModel):
+    """Simplified response for guests - no persistence."""
+    suggestions: List[SuggestionItem]
+    summary: str
+    risk_note: str
+    tax_note: Optional[str] = None
+    market_context: dict
+    disclaimer: str
+    generated_at: datetime
+
 @router.post("/invest", response_model=RecommendationResponse)
 async def get_investment_recommendation(
     user_id: int,
@@ -279,3 +299,125 @@ async def backtest_strategy(
     
     import json
     return json.loads(response)
+
+@router.post("/invest/guest", response_model=GuestRecommendationResponse)
+async def get_guest_recommendation(
+    request: GuestInvestmentInput,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get investment recommendation for guest users.
+    No user context or portfolio - purely market-based suggestions.
+    """
+    # Get available options
+    available_options = await _get_available_options_guest(db, request)
+    
+    # Get market data
+    market_data = await _get_market_snapshot(db)
+    
+    # Build basic preferences
+    preferences = {
+        "risk_tolerance": request.risk_profile,
+        "horizon_years": 5,  # Default assumption for guests
+        "avoid_lock_ins": request.avoid_lock_ins,
+        "prefer_tax_saving": request.prefer_tax_saving,
+    }
+    
+    # Get AI recommendation (no portfolio context for guests)
+    ai_client = OpenRouterClient()
+    recommendation = await ai_client.generate_investment_suggestion(
+        investment_amount=request.amount,
+        current_portfolio=[],  # Empty for guests
+        market_data=market_data,
+        user_preferences=preferences,
+        available_options=available_options
+    )
+    
+    # Convert AI response to structured format
+    suggestions = []
+    for s in recommendation.get("suggestions", []):
+        suggestions.append(SuggestionItem(
+            asset_type=s.get("asset_type", "unknown"),
+            instrument_name=s.get("instrument", ""),
+            instrument_id=s.get("instrument_id", ""),
+            amount=s.get("amount", 0),
+            percentage=s.get("percentage", 0),
+            reason=s.get("reason", ""),
+            highlight=s.get("highlight"),
+            current_rate=s.get("current_rate")
+        ))
+    
+    return GuestRecommendationResponse(
+        suggestions=suggestions,
+        summary=recommendation.get("summary", ""),
+        risk_note=recommendation.get("risk_note", ""),
+        tax_note=recommendation.get("tax_note"),
+        market_context=market_data,
+        disclaimer="This is educational information based on current market data. Not personalized investment advice. Sign in to get portfolio-aware recommendations.",
+        generated_at=datetime.utcnow()
+    )
+
+
+async def _get_available_options_guest(
+    db: AsyncSession,
+    request: GuestInvestmentInput
+) -> dict:
+    """Get available investment options for guest users."""
+    options = {}
+    
+    # Top mutual funds by category
+    mf_result = await db.execute(
+        select(MutualFund)
+        .where(MutualFund.plan_type == "direct")
+        .order_by(MutualFund.return_1y.desc().nullslast())
+        .limit(30)
+    )
+    mutual_funds = mf_result.scalars().all()
+    options["mutual_funds"] = [
+        {
+            "scheme_code": mf.scheme_code,
+            "name": mf.scheme_name,
+            "category": mf.category,
+            "return_1y": mf.return_1y,
+            "nav": mf.nav
+        }
+        for mf in mutual_funds
+    ]
+    
+    # Best FD rates if included
+    if request.include_fds:
+        fd_result = await db.execute(
+            select(FixedDepositRate)
+            .order_by(FixedDepositRate.interest_rate_general.desc())
+            .limit(15)
+        )
+        fds = fd_result.scalars().all()
+        options["fixed_deposits"] = [
+            {
+                "bank": fd.bank_name,
+                "bank_type": fd.bank_type,
+                "tenure": fd.tenure_display,
+                "rate_general": fd.interest_rate_general,
+                "rate_senior": fd.interest_rate_senior,
+            }
+            for fd in fds
+        ]
+    
+    # Gold/Silver options if included
+    if request.include_gold:
+        etf_result = await db.execute(
+            select(ETF).where(ETF.underlying.in_(["gold", "silver"]))
+        )
+        etfs = etf_result.scalars().all()
+        options["gold_silver_etfs"] = [
+            {
+                "symbol": etf.symbol,
+                "name": etf.name,
+                "underlying": etf.underlying,
+                "nav": etf.nav,
+                "expense_ratio": etf.expense_ratio
+            }
+            for etf in etfs
+        ]
+    
+    return options
