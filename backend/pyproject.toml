@@ -1,9 +1,9 @@
 [project]
 name = "Zrata-X"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered investment co-pilot for passive investors"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "aiohttp>=3.13.2",
     "alembic>=1.17.2",
@@ -18,7 +18,7 @@ dependencies = [
     "orjson>=3.11.5",
     "pandas>=2.3.3",
     "passlib[bcrypt]>=1.7.4",
-    "pydantic>=2.12.5",
+    "pydantic[email]>=2.12.5",
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
     "python-jose[cryptography]>=3.5.0",
@@ -29,3 +29,31 @@ dependencies = [
     "uvicorn[standard]>=0.40.0",
     "yfinance>=1.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+
+# Entry point scripts
+[project.scripts]
+zrata = "app.main:run"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"] # We need to tell hatchling what package to build , we named zrata but we need to build app so it gets confused

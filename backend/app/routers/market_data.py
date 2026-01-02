@@ -151,8 +151,8 @@ async def get_mutual_funds(
     search: Optional[str] = Query(None, min_length=2),
     category: Optional[str] = Query(None),
     amc: Optional[str] = Query(None),
-    plan_type: str = Query("direct", regex="^(direct|regular)$"),
-    sort_by: str = Query("return_1y", regex="^(nav|return_1y|return_3y|aum)$"),
+    plan_type: str = Query("direct", pattern="^(direct|regular)$"),
+    sort_by: str = Query("return_1y", pattern="^(nav|return_1y|return_3y|aum)$"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db)
 ):
@@ -210,7 +210,7 @@ async def get_etfs(
 
 @router.get("/gold-silver", response_model=List[GoldPriceResponse])
 async def get_gold_silver_prices(
-    metal_type: Optional[str] = Query(None, regex="^(gold|silver)$"),
+    metal_type: Optional[str] = Query(None, pattern="^(gold|silver)$"),
     days: int = Query(7, ge=1, le=365),
     db: AsyncSession = Depends(get_db)
 ):
@@ -293,7 +293,7 @@ async def get_market_news(
 
 @router.post("/refresh")
 async def trigger_data_refresh(
-    data_type: str = Query(..., regex="^(fd_rates|mf_nav|gold_prices|news|all)$"),
+    data_type: str = Query(..., pattern="^(fd_rates|mf_nav|gold_prices|news|all)$"),
     db: AsyncSession = Depends(get_db)
 ):
     """Manually trigger data refresh (admin only in production)."""
