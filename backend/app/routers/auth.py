@@ -4,6 +4,7 @@ Authentication routes - JWT-based auth.
 from datetime import datetime, timedelta
 from typing import Optional
 
+import bcrypt
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import RiskTolerance, User
@@ -11,16 +12,12 @@ from app.services.memory.supermemory_service import SupermemoryService
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
@@ -67,13 +64,19 @@ class TokenData(BaseModel):
     user_id: Optional[int] = None
 
 
-# Helper functions
+# Helper functions - using bcrypt directly instead of passlib
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against its hash."""
+    return bcrypt.checkpw(
+        plain_password.encode('utf-8'),
+        hashed_password.encode('utf-8')
+    )
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt."""
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -147,19 +150,22 @@ async def register(
     await db.commit()
     await db.refresh(user)
     
-    # Initialize user memory in Supermemory
-    memory_service = SupermemoryService()
-    await memory_service.add_user_memory(
-        user_id=str(user.id),
-        content=f"""
-        New user profile created:
-        Name: {user.full_name}
-        Risk Tolerance: {user.risk_tolerance.value}
-        Investment Horizon: {user.investment_horizon_years} years
-        Monthly Capacity: ₹{user.monthly_investment_capacity or 'Not specified'}
-        """,
-        metadata={"type": "user_profile_created"}
-    )
+    # Initialize user memory in Supermemory (non-blocking, fail silently)
+    try:
+        memory_service = SupermemoryService()
+        await memory_service.add_user_memory(
+            user_id=str(user.id),
+            content=f"""
+            New user profile created:
+            Name: {user.full_name}
+            Risk Tolerance: {user.risk_tolerance.value}
+            Investment Horizon: {user.investment_horizon_years} years
+            Monthly Capacity: ₹{user.monthly_investment_capacity or 'Not specified'}
+            """,
+            metadata={"type": "user_profile_created"}
+        )
+    except Exception:
+        pass  # Don't fail registration if memory service is down
     
     # Create access token
     access_token = create_access_token(data={"sub": user.id})
@@ -220,14 +226,17 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     
-    # Update memory with preference changes
+    # Update memory with preference changes (non-blocking)
     if update_dict:
-        memory_service = SupermemoryService()
-        await memory_service.add_user_memory(
-            user_id=str(current_user.id),
-            content=f"User updated preferences: {update_dict}",
-            metadata={"type": "preference_update", "changes": update_dict}
-        )
+        try:
+            memory_service = SupermemoryService()
+            await memory_service.add_user_memory(
+                user_id=str(current_user.id),
+                content=f"User updated preferences: {update_dict}",
+                metadata={"type": "preference_update", "changes": update_dict}
+            )
+        except Exception:
+            pass
     
     return UserResponse.model_validate(current_user)
 
@@ -235,5 +244,4 @@ async def update_me(
 @router.post("/logout")
 async def logout(current_user: User = Depends(get_current_user)):
     """Logout (client should discard token)."""
-    # maybe in future blacklist the token
     return {"message": "Successfully logged out"}

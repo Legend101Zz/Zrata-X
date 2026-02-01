@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     METALS_API_KEY: Optional[str] = None  # Optional: for gold prices
     
     # AI Models (configurable via env - not hardcoded)
-    PRIMARY_MODEL: str = "anthropic/claude-sonnet-4-20250514"
-    FAST_MODEL: str = "meta-llama/llama-3.1-8b-instruct"
+    PRIMARY_MODEL: str = "anthropic/claude-sonnet-4.5"
+    FAST_MODEL: str = "anthropic/claude-haiku-4.5"
     
     # Security
     SECRET_KEY: str

@@ -45,6 +45,29 @@ lint:
 format:
 	uv run ruff format .
 
+# Run all scrapers
+scrape-all:
+	uv run python -m app.scripts.run_all_scrapers --type all
+
+# Run specific scrapers
+scrape-mf:
+	uv run python -m app.scripts.run_all_scrapers --type mf
+
+scrape-etf:
+	uv run python -m app.scripts.run_all_scrapers --type etf
+
+scrape-gold:
+	uv run python -m app.scripts.run_all_scrapers --type gold
+
+scrape-fd:
+	uv run python -m app.scripts.run_all_scrapers --type fd
+
+scrape-macro:
+	uv run python -m app.scripts.run_all_scrapers --type macro
+
+scrape-news:
+	uv run python -m app.scripts.run_all_scrapers --type news
+
 # Show available commands
 help:
 	@echo ""

@@ -17,7 +17,6 @@ dependencies = [
     "openai>=2.14.0",
     "orjson>=3.11.5",
     "pandas>=2.3.3",
-    "passlib[bcrypt]>=1.7.4",
     "pydantic[email]>=2.12.5",
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
@@ -28,6 +27,7 @@ dependencies = [
     "supermemory>=3.12.1",
     "uvicorn[standard]>=0.40.0",
     "yfinance>=1.0",
+    "bcrypt>=5.0.0",
 ]
 
 [project.optional-dependencies]

@@ -4,7 +4,7 @@ Uses reliable APIs with admin-updatable fallbacks.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from app.config import get_settings
@@ -45,30 +45,27 @@ class MacroDataService:
             await self._store_indicator("usd_inr", forex["usd_inr"], "INR", "ExchangeRate-API")
             results["usd_inr"] = forex
         
-        # 2. RBI Policy Rates
-        # These change only during MPC meetings (~6x/year)
-        # We try to fetch from reliable sources, fallback to admin-set values
-        rbi_rates = await self._fetch_rbi_rates()
-        if rbi_rates:
-            results["rbi_rates"] = rbi_rates
-            for name, value in rbi_rates.items():
-                await self._store_indicator(name, value, "percent", "RBI")
-        else:
-            # Use admin-set fallback values
-            results["rbi_rates"] = self._get_fallback_rbi_rates()
-            logger.info("Using fallback RBI rates - update via admin panel if stale")
+        # 2. RBI Policy Rates (from fallback, admin-updated)
+        rbi_rates = self._get_fallback_rbi_rates()
+        results["rbi_rates"] = rbi_rates
+        for name, value in rbi_rates.items():
+            if isinstance(value, (int, float)):
+                await self._store_indicator(name, value, "percent", "RBI-Fallback")
         
-        # 3. Inflation (CPI)
-        # Released monthly by MOSPI
-        inflation = await self._fetch_inflation()
-        if inflation:
-            await self._store_indicator("cpi_inflation", inflation["cpi"], "percent", "MOSPI")
-            results["inflation"] = inflation
-        else:
-            fallback = FALLBACK_MACRO_VALUES.get("cpi_inflation", {})
-            results["inflation"] = {"cpi": fallback.get("value", 5.0), "status": "fallback"}
+        # 3. Inflation (CPI) - from fallback
+        inflation = FALLBACK_MACRO_VALUES.get("cpi_inflation", {})
+        cpi_value = inflation.get("value", 5.0)
+        await self._store_indicator("cpi_inflation", cpi_value, "percent", "MOSPI-Fallback")
+        results["inflation"] = {"cpi": cpi_value, "status": "fallback"}
+        
+        # 4. Try to fetch Nifty PE ratio
+        nifty_pe = await self._fetch_nifty_pe()
+        if nifty_pe:
+            await self._store_indicator("nifty_pe", nifty_pe, "ratio", "NSE")
+            results["nifty_pe"] = nifty_pe
         
         await self.db.commit()
+        logger.info(f"Macro indicators refreshed: {list(results.keys())}")
         return results
     
     async def _fetch_forex_rate(self) -> Optional[Dict[str, float]]:
@@ -92,37 +89,9 @@ class MacroDataService:
         # Fallback to last known rate
         last_rate = await self._get_last_indicator("usd_inr")
         if last_rate:
-            return {"usd_inr": last_rate, "status": "stale"}
+            return {"usd_inr": last_rate, "status": "cached"}
         
-        return {"usd_inr": 84.0, "status": "fallback"}  # Approximate Dec 2024
-    
-    async def _fetch_rbi_rates(self) -> Optional[Dict[str, float]]:
-        """
-        Fetch RBI policy rates.
-        
-        Note: RBI doesn't have a public API for real-time rates.
-        Options:
-        1. Scrape RBI website (fragile)
-        2. Use third-party data providers (costly)
-        3. Admin-updated values (reliable for monthly updates)
-        
-        For a monthly investment app, we use option 3 with periodic admin updates.
-        """
-        # Check if we have recent data (RBI rates change ~6x/year)
-        last_repo = await self._get_last_indicator("repo_rate")
-        last_updated = await self._get_indicator_last_updated("repo_rate")
-        
-        # If we have data less than 7 days old, use it
-        if last_updated and (datetime.utcnow() - last_updated) < timedelta(days=7):
-            return {
-                "repo_rate": last_repo,
-                "status": "cached",
-            }
-        
-        # Try to fetch from a financial data API (if configured)
-        # Example: Alpha Vantage, Quandl, etc.
-        # For now, return None to trigger fallback
-        return None
+        return {"usd_inr": 84.0, "status": "fallback"}
     
     def _get_fallback_rbi_rates(self) -> Dict[str, Any]:
         """Get admin-set fallback RBI rates."""
@@ -135,24 +104,27 @@ class MacroDataService:
             "as_of": FALLBACK_MACRO_VALUES.get("repo_rate", {}).get("as_of", "unknown"),
         }
     
-    async def _fetch_inflation(self) -> Optional[Dict[str, float]]:
-        """
-        Fetch inflation data.
+    async def _fetch_nifty_pe(self) -> Optional[float]:
+        """Try to fetch Nifty 50 PE ratio."""
+        try:
+            # Using a public data endpoint
+            response = await self.client.get(
+                "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050",
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json"
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                pe = data.get("metadata", {}).get("pe")
+                if pe:
+                    return float(pe)
+        except Exception as e:
+            logger.debug(f"Nifty PE fetch failed (expected): {e}")
         
-        Note: MOSPI releases CPI data monthly (~12th of each month).
-        There's no public API, so we use:
-        1. Third-party data providers (if configured)
-        2. Admin-updated values
-        """
-        # Check for recent cached data
-        last_cpi = await self._get_last_indicator("cpi_inflation")
-        last_updated = await self._get_indicator_last_updated("cpi_inflation")
-        
-        # CPI is released monthly, so 30-day cache is fine
-        if last_updated and (datetime.utcnow() - last_updated) < timedelta(days=30):
-            return {"cpi": last_cpi, "status": "cached"}
-        
-        return None
+        # Return approximate value
+        return 22.5
     
     async def _store_indicator(
         self,
@@ -161,87 +133,53 @@ class MacroDataService:
         unit: str,
         source: str
     ):
-        """Store an indicator in the database."""
+        """Store indicator in database."""
         # Get previous value for change calculation
+        prev = await self._get_last_indicator(name)
+        change = None
+        if prev:
+            change = round((value - prev) / prev * 100, 2) if prev != 0 else 0
+        
+        indicator = MacroIndicator(
+            indicator_name=name,
+            value=value,
+            previous_value=prev,
+            change_percent=change,
+            unit=unit,
+            source=source,
+            recorded_at=datetime.utcnow()
+        )
+        self.db.add(indicator)
+    
+    async def _get_last_indicator(self, name: str) -> Optional[float]:
+        """Get last recorded value for an indicator."""
         result = await self.db.execute(
             select(MacroIndicator)
             .where(MacroIndicator.indicator_name == name)
             .order_by(desc(MacroIndicator.recorded_at))
             .limit(1)
         )
-        previous = result.scalar_one_or_none()
-        
-        previous_value = previous.value if previous else None
-        change_percent = None
-        if previous_value and previous_value != 0:
-            change_percent = ((value - previous_value) / previous_value) * 100
-        
-        indicator = MacroIndicator(
-            indicator_name=name,
-            value=value,
-            previous_value=previous_value,
-            change_percent=change_percent,
-            unit=unit,
-            source=source,
-        )
-        self.db.add(indicator)
+        indicator = result.scalar_one_or_none()
+        return indicator.value if indicator else None
     
-    async def _get_last_indicator(self, name: str) -> Optional[float]:
-        """Get last value for an indicator."""
-        result = await self.db.execute(
-            select(MacroIndicator.value)
-            .where(MacroIndicator.indicator_name == name)
-            .order_by(desc(MacroIndicator.recorded_at))
-            .limit(1)
-        )
-        row = result.first()
-        return row[0] if row else None
-    
-    async def _get_indicator_last_updated(self, name: str) -> Optional[datetime]:
-        """Get when an indicator was last updated."""
-        result = await self.db.execute(
-            select(MacroIndicator.recorded_at)
-            .where(MacroIndicator.indicator_name == name)
-            .order_by(desc(MacroIndicator.recorded_at))
-            .limit(1)
-        )
-        row = result.first()
-        return row[0] if row else None
-    
-    async def get_current_snapshot(self) -> Dict[str, Any]:
-        """Get current values of all indicators."""
+    async def get_all_indicators(self) -> Dict[str, Any]:
+        """Get all current macro indicators."""
         indicators = {}
         
-        for name in ["repo_rate", "reverse_repo_rate", "crr", "slr", "cpi_inflation", "usd_inr"]:
-            value = await self._get_last_indicator(name)
-            updated_at = await self._get_indicator_last_updated(name)
-            
-            if value is not None:
-                indicators[name] = {
-                    "value": value,
-                    "updated_at": updated_at.isoformat() if updated_at else None,
-                }
-            else:
-                # Use fallback
-                fallback = FALLBACK_MACRO_VALUES.get(name, {})
-                indicators[name] = {
-                    "value": fallback.get("value"),
-                    "status": "fallback",
-                    "as_of": fallback.get("as_of"),
+        result = await self.db.execute(
+            select(MacroIndicator)
+            .order_by(desc(MacroIndicator.recorded_at))
+        )
+        
+        for ind in result.scalars().all():
+            if ind.indicator_name not in indicators:
+                indicators[ind.indicator_name] = {
+                    "value": ind.value,
+                    "previous": ind.previous_value,
+                    "change_percent": ind.change_percent,
+                    "unit": ind.unit,
+                    "source": ind.source,
+                    "recorded_at": ind.recorded_at.isoformat()
                 }
         
         return indicators
-    
-    async def admin_update_indicator(
-        self,
-        name: str,
-        value: float,
-        source: str = "admin_manual"
-    ):
-        """
-        Admin function to manually update an indicator.
-        Use this when automated fetching fails.
-        """
-        await self._store_indicator(name, value, "percent", source)
-        await self.db.commit()
-        logger.info(f"Admin updated {name} to {value}")

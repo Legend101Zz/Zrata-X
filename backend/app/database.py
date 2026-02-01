@@ -1,9 +1,10 @@
 """
 Database connection and session management.
 """
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
 from app.config import get_settings
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
+from sqlalchemy.orm import DeclarativeBase
 
 settings = get_settings()
 
@@ -26,6 +27,15 @@ AsyncSessionLocal = async_sessionmaker(
 class Base(DeclarativeBase):
     pass
 
+
+def get_async_session_factory():
+    """Get async session factory for scripts."""
+    from app.config import get_settings
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    
+    settings = get_settings()
+    engine = create_async_engine(settings.DATABASE_URL)
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():
     async with AsyncSessionLocal() as session:
