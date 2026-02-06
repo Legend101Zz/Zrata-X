@@ -1,0 +1,261 @@
+"""
+Alembic migration: Add enhanced fields to FD, MF, and ETF tables
+
+Revision ID: add_enhanced_fields
+Revises: [previous_revision]
+Create Date: 2024-02-07
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSON
+
+# revision identifiers
+revision = 'add_enhanced_fields_001'
+down_revision = None  # Update with your previous revision
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    """Add enhanced fields to all asset tables."""
+
+    # =====================================================
+    # FIXED DEPOSIT ENHANCEMENTS
+    # =====================================================
+    print("Adding enhanced fields to fd_rates table...")
+
+    # Add new FD fields
+    op.add_column('fd_rates', sa.Column('rate_super_senior', sa.Float(), nullable=True,
+                                       comment='Super senior citizen rate (>80 years)'))
+    op.add_column('fd_rates', sa.Column('compound_frequency', sa.String(50), nullable=True,
+                                       comment='monthly, quarterly, annually, cumulative'))
+    op.add_column('fd_rates', sa.Column('payout_type', sa.String(50), nullable=True,
+                                       comment='monthly_interest, quarterly_interest, cumulative'))
+    op.add_column('fd_rates', sa.Column('premature_withdrawal_penalty', sa.Text(), nullable=True,
+                                       comment='Penalty description for early withdrawal'))
+    op.add_column('fd_rates', sa.Column('lock_in_period_days', sa.Integer(), nullable=True,
+                                       comment='Lock-in period especially for tax-saving FDs'))
+    op.add_column('fd_rates', sa.Column('is_tax_saving', sa.Boolean(), default=False,
+                                       comment='80C eligible tax-saving FD (5 year lock-in)'))
+    op.add_column('fd_rates', sa.Column('is_cumulative', sa.Boolean(), nullable=True,
+                                       comment='Whether interest is cumulative'))
+    op.add_column('fd_rates', sa.Column('online_booking_available', sa.Boolean(), nullable=True,
+                                       comment='Can be booked online'))
+    op.add_column('fd_rates', sa.Column('senior_citizen_extra_rate', sa.Float(), nullable=True,
+                                       comment='Extra rate for senior citizens (typically 0.25-0.50)'))
+    op.add_column('fd_rates', sa.Column('tds_applicable', sa.Boolean(), default=True,
+                                       comment='TDS deducted if interest > threshold'))
+    op.add_column('fd_rates', sa.Column('effective_annual_rate', sa.Float(), nullable=True,
+                                       comment='Effective rate after compounding'))
+    op.add_column('fd_rates', sa.Column('credit_rating', sa.String(20), nullable=True,
+                                       comment='Bank/NBFC credit rating'))
+    op.add_column('fd_rates', sa.Column('last_rate_change_date', sa.DateTime(), nullable=True,
+                                       comment='When rate was last updated'))
+
+    # Create index on common query fields
+    op.create_index('idx_fd_tax_saving', 'fd_rates', ['is_tax_saving'])
+    op.create_index('idx_fd_compound_freq', 'fd_rates', ['compound_frequency'])
+
+    # =====================================================
+    # MUTUAL FUND ENHANCEMENTS
+    # =====================================================
+    print("Adding enhanced fields to mutual_funds table...")
+
+    # Add comprehensive return fields
+    op.add_column('mutual_funds', sa.Column('return_ytd', sa.Float(), nullable=True,
+                                           comment='Year-to-date return'))
+    op.add_column('mutual_funds', sa.Column('return_absolute_1y', sa.Float(), nullable=True,
+                                           comment='Absolute 1-year return (non-annualized)'))
+    op.add_column('mutual_funds', sa.Column('rolling_return_1y_avg', sa.Float(), nullable=True,
+                                           comment='Average of rolling 1-year returns'))
+    op.add_column('mutual_funds', sa.Column('best_1y_return', sa.Float(), nullable=True,
+                                           comment='Best rolling 1-year return'))
+    op.add_column('mutual_funds', sa.Column('worst_1y_return', sa.Float(), nullable=True,
+                                           comment='Worst rolling 1-year return'))
+
+    # Add risk metrics
+    op.add_column('mutual_funds', sa.Column('volatility_1y', sa.Float(), nullable=True,
+                                           comment='Annualized volatility (standard deviation)'))
+    op.add_column('mutual_funds', sa.Column('sharpe_ratio_1y', sa.Float(), nullable=True,
+                                           comment='Risk-adjusted return metric'))
+    op.add_column('mutual_funds', sa.Column('max_drawdown_1y', sa.Float(), nullable=True,
+                                           comment='Maximum peak-to-trough decline'))
+    op.add_column('mutual_funds', sa.Column('downside_deviation', sa.Float(), nullable=True,
+                                           comment='Semi-deviation (downside volatility)'))
+    op.add_column('mutual_funds', sa.Column('sortino_ratio', sa.Float(), nullable=True,
+                                           comment='Downside risk-adjusted return'))
+    op.add_column('mutual_funds', sa.Column('alpha_1y', sa.Float(), nullable=True,
+                                           comment='Excess return vs benchmark'))
+    op.add_column('mutual_funds', sa.Column('beta_1y', sa.Float(), nullable=True,
+                                           comment='Systematic risk vs benchmark'))
+
+    # Add fund details
+    op.add_column('mutual_funds', sa.Column('exit_load', sa.String(200), nullable=True,
+                                           comment='Exit load details'))
+    op.add_column('mutual_funds', sa.Column('min_sip_amount', sa.Float(), nullable=True,
+                                           comment='Minimum SIP investment'))
+    op.add_column('mutual_funds', sa.Column('min_lumpsum_amount', sa.Float(), nullable=True,
+                                           comment='Minimum lumpsum investment'))
+    op.add_column('mutual_funds', sa.Column('fund_manager', sa.String(200), nullable=True,
+                                           comment='Fund manager name'))
+    op.add_column('mutual_funds', sa.Column('fund_manager_tenure_years', sa.Float(), nullable=True,
+                                           comment='Manager tenure in years'))
+    op.add_column('mutual_funds', sa.Column('launch_date', sa.DateTime(), nullable=True,
+                                           comment='Fund launch date'))
+    op.add_column('mutual_funds', sa.Column('aum_trend_6m', sa.Float(), nullable=True,
+                                           comment='AUM change % over 6 months'))
+
+    # Add portfolio characteristics
+    op.add_column('mutual_funds', sa.Column('portfolio_pe_ratio', sa.Float(), nullable=True,
+                                           comment='Weighted average PE ratio'))
+    op.add_column('mutual_funds', sa.Column('portfolio_pb_ratio', sa.Float(), nullable=True,
+                                           comment='Weighted average PB ratio'))
+    op.add_column('mutual_funds', sa.Column('top_holdings', JSON, nullable=True,
+                                           comment='Top 10 holdings with allocation'))
+    op.add_column('mutual_funds', sa.Column('sector_allocation', JSON, nullable=True,
+                                           comment='Sector-wise allocation'))
+    op.add_column('mutual_funds', sa.Column('market_cap_allocation', JSON, nullable=True,
+                                           comment='Large/Mid/Small cap allocation'))
+
+    # Create indexes for common queries
+    op.create_index('idx_mf_sharpe_ratio', 'mutual_funds', ['sharpe_ratio_1y'])
+    op.create_index('idx_mf_expense_ratio', 'mutual_funds', ['expense_ratio'])
+    op.create_index('idx_mf_volatility', 'mutual_funds', ['volatility_1y'])
+
+    # =====================================================
+    # ETF ENHANCEMENTS
+    # =====================================================
+    print("Adding enhanced fields to etfs table...")
+
+    # Add underlying and benchmark info
+    op.add_column('etfs', sa.Column('underlying_index', sa.String(100), nullable=True,
+                                   comment='Underlying index being tracked'))
+    op.add_column('etfs', sa.Column('benchmark', sa.String(100), nullable=True,
+                                   comment='Benchmark for comparison'))
+
+    # Add liquidity metrics
+    op.add_column('etfs', sa.Column('avg_daily_volume', sa.Integer(), nullable=True,
+                                   comment='Average daily trading volume'))
+    op.add_column('etfs', sa.Column('avg_daily_volume_value', sa.Float(), nullable=True,
+                                   comment='Average daily value traded'))
+    op.add_column('etfs', sa.Column('bid_ask_spread_pct', sa.Float(), nullable=True,
+                                   comment='Bid-ask spread as percentage'))
+
+    # Add performance and risk metrics
+    op.add_column('etfs', sa.Column('volatility_1y', sa.Float(), nullable=True,
+                                   comment='Annualized volatility'))
+    op.add_column('etfs', sa.Column('tracking_error', sa.Float(), nullable=True,
+                                   comment='Tracking error vs benchmark'))
+    op.add_column('etfs', sa.Column('high_52w', sa.Float(), nullable=True,
+                                   comment='52-week high'))
+    op.add_column('etfs', sa.Column('low_52w', sa.Float(), nullable=True,
+                                   comment='52-week low'))
+
+    # Add return fields
+    op.add_column('etfs', sa.Column('return_1m', sa.Float(), nullable=True))
+    op.add_column('etfs', sa.Column('return_3m', sa.Float(), nullable=True))
+    op.add_column('etfs', sa.Column('return_6m', sa.Float(), nullable=True))
+    op.add_column('etfs', sa.Column('return_1y', sa.Float(), nullable=True))
+
+    # Add holdings and creation/redemption info
+    op.add_column('etfs', sa.Column('top_holdings', JSON, nullable=True,
+                                   comment='Top holdings breakdown'))
+    op.add_column('etfs', sa.Column('creation_unit_size', sa.Integer(), nullable=True,
+                                   comment='Minimum units for creation'))
+    op.add_column('etfs', sa.Column('redemption_unit_size', sa.Integer(), nullable=True,
+                                   comment='Minimum units for redemption'))
+
+    # Add tax information
+    op.add_column('etfs', sa.Column('tax_treatment', sa.String(50), nullable=True,
+                                   comment='equity or non_equity'))
+    op.add_column('etfs', sa.Column('ltcg_period_months', sa.Integer(), nullable=True,
+                                   comment='LTCG holding period'))
+    op.add_column('etfs', sa.Column('ltcg_tax_rate', sa.String(100), nullable=True,
+                                   comment='LTCG tax rate'))
+    op.add_column('etfs', sa.Column('stcg_tax_rate', sa.String(100), nullable=True,
+                                   comment='STCG tax rate'))
+
+    # Create indexes
+    op.create_index('idx_etf_tracking_error', 'etfs', ['tracking_error'])
+    op.create_index('idx_etf_liquidity', 'etfs', ['avg_daily_volume_value'])
+
+    print("Enhanced fields migration completed successfully!")
+
+
+def downgrade():
+    """Remove enhanced fields (for rollback)."""
+
+    # Drop ETF enhancements
+    print("Removing ETF enhanced fields...")
+    op.drop_index('idx_etf_tracking_error', 'etfs')
+    op.drop_index('idx_etf_liquidity', 'etfs')
+    op.drop_column('etfs', 'stcg_tax_rate')
+    op.drop_column('etfs', 'ltcg_tax_rate')
+    op.drop_column('etfs', 'ltcg_period_months')
+    op.drop_column('etfs', 'tax_treatment')
+    op.drop_column('etfs', 'redemption_unit_size')
+    op.drop_column('etfs', 'creation_unit_size')
+    op.drop_column('etfs', 'top_holdings')
+    op.drop_column('etfs', 'return_1y')
+    op.drop_column('etfs', 'return_6m')
+    op.drop_column('etfs', 'return_3m')
+    op.drop_column('etfs', 'return_1m')
+    op.drop_column('etfs', 'low_52w')
+    op.drop_column('etfs', 'high_52w')
+    op.drop_column('etfs', 'tracking_error')
+    op.drop_column('etfs', 'volatility_1y')
+    op.drop_column('etfs', 'bid_ask_spread_pct')
+    op.drop_column('etfs', 'avg_daily_volume_value')
+    op.drop_column('etfs', 'avg_daily_volume')
+    op.drop_column('etfs', 'benchmark')
+    op.drop_column('etfs', 'underlying_index')
+
+    # Drop MF enhancements
+    print("Removing MF enhanced fields...")
+    op.drop_index('idx_mf_volatility', 'mutual_funds')
+    op.drop_index('idx_mf_expense_ratio', 'mutual_funds')
+    op.drop_index('idx_mf_sharpe_ratio', 'mutual_funds')
+    op.drop_column('mutual_funds', 'market_cap_allocation')
+    op.drop_column('mutual_funds', 'sector_allocation')
+    op.drop_column('mutual_funds', 'top_holdings')
+    op.drop_column('mutual_funds', 'portfolio_pb_ratio')
+    op.drop_column('mutual_funds', 'portfolio_pe_ratio')
+    op.drop_column('mutual_funds', 'aum_trend_6m')
+    op.drop_column('mutual_funds', 'launch_date')
+    op.drop_column('mutual_funds', 'fund_manager_tenure_years')
+    op.drop_column('mutual_funds', 'fund_manager')
+    op.drop_column('mutual_funds', 'min_lumpsum_amount')
+    op.drop_column('mutual_funds', 'min_sip_amount')
+    op.drop_column('mutual_funds', 'exit_load')
+    op.drop_column('mutual_funds', 'beta_1y')
+    op.drop_column('mutual_funds', 'alpha_1y')
+    op.drop_column('mutual_funds', 'sortino_ratio')
+    op.drop_column('mutual_funds', 'downside_deviation')
+    op.drop_column('mutual_funds', 'max_drawdown_1y')
+    op.drop_column('mutual_funds', 'sharpe_ratio_1y')
+    op.drop_column('mutual_funds', 'volatility_1y')
+    op.drop_column('mutual_funds', 'worst_1y_return')
+    op.drop_column('mutual_funds', 'best_1y_return')
+    op.drop_column('mutual_funds', 'rolling_return_1y_avg')
+    op.drop_column('mutual_funds', 'return_absolute_1y')
+    op.drop_column('mutual_funds', 'return_ytd')
+
+    # Drop FD enhancements
+    print("Removing FD enhanced fields...")
+    op.drop_index('idx_fd_compound_freq', 'fd_rates')
+    op.drop_index('idx_fd_tax_saving', 'fd_rates')
+    op.drop_column('fd_rates', 'last_rate_change_date')
+    op.drop_column('fd_rates', 'credit_rating')
+    op.drop_column('fd_rates', 'effective_annual_rate')
+    op.drop_column('fd_rates', 'tds_applicable')
+    op.drop_column('fd_rates', 'senior_citizen_extra_rate')
+    op.drop_column('fd_rates', 'online_booking_available')
+    op.drop_column('fd_rates', 'is_cumulative')
+    op.drop_column('fd_rates', 'is_tax_saving')
+    op.drop_column('fd_rates', 'lock_in_period_days')
+    op.drop_column('fd_rates', 'premature_withdrawal_penalty')
+    op.drop_column('fd_rates', 'payout_type')
+    op.drop_column('fd_rates', 'compound_frequency')
+    op.drop_column('fd_rates', 'rate_super_senior')
+
+    print("Enhanced fields rollback completed!")
