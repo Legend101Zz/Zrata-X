@@ -71,109 +71,65 @@ class GuestRecommendationResponse(BaseModel):
     disclaimer: str
     generated_at: datetime
 
+
+class GuestPipelineInput(BaseModel):
+    """Input for guest pipeline — no user_id needed."""
+    amount: float = Field(..., gt=0, le=10000000)
+    risk_override: Optional[str] = None
+    preferences_override: Optional[dict] = None
+
+
 @router.post("/invest", response_model=RecommendationResponse)
 async def get_investment_recommendation(
     user_id: int,
     request: InvestmentInput,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get AI-powered investment recommendation for a given amount.
-    No hardcoded allocation rules - fully dynamic.
-    """
-    # Get user
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Get current portfolio
-    holdings_result = await db.execute(
-        select(PortfolioHolding).where(PortfolioHolding.user_id == user_id)
+
+    # Use the pipeline correctly
+    pipeline = RecommendationPipeline(db)  # ← was missing db
+    result = await pipeline.generate(       # ← was calling .run()
+        user_id=user_id,
+        amount=request.amount,
+        risk_override=request.risk_override,
     )
-    holdings = holdings_result.scalars().all()
-    
-    current_portfolio = [
-        {
-            "asset_type": h.asset_type,
-            "name": h.asset_name,
-            "invested": h.invested_amount,
-            "current_value": h.current_value
-        }
-        for h in holdings
-    ]
-    
-    # Get available options
-    available_options = await _get_available_options(db, request)
-    
-    # Get market data
-    market_data = await _get_market_snapshot(db)
-    
-    # Get user context from memory
-    memory_service = SupermemoryService()
-    user_context = await memory_service.get_user_context(str(user_id))
-    
-    # Build preferences
-    risk = request.risk_override or user.risk_tolerance.value
-    preferences = {
-        "risk_tolerance": risk,
-        "horizon_years": user.investment_horizon_years,
-        "avoid_lock_ins": request.avoid_lock_ins,
-        "prefer_tax_saving": request.prefer_tax_saving,
-        "user_history": user_context,
-        **(user.preferences or {})
-    }
-    
-    # Get AI recommendation
-    # ai_client = OpenRouterClient()
-    pipeline = RecommendationPipeline()
-    recommendation = await pipeline.run(
-        investment_amount=request.amount,
-        current_portfolio=current_portfolio,
-        market_data=market_data,
-        user_preferences=preferences,
-        available_options=available_options,
-        user_context=user_context,
-    )
-    
+
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+
     # Store the plan
+    risk = request.risk_override or user.risk_tolerance.value
+    market_data = await _get_market_snapshot(db)
+
     plan = InvestmentPlan(
         user_id=user_id,
         investment_amount=request.amount,
         risk_level_used=risk,
-        recommendations=recommendation.get("suggestions", []),
+        recommendations=result.get("allocation", []),
         market_analysis=market_data,
-        reasoning=recommendation.get("summary", ""),
-        expires_at=datetime.utcnow() + timedelta(days=7)
+        reasoning=result.get("explanation", ""),
+        expires_at=datetime.utcnow() + timedelta(days=7),
     )
     db.add(plan)
     await db.commit()
     await db.refresh(plan)
-    
-    # Convert AI response to structured format
-    suggestions = []
-    for s in recommendation.get("suggestions", []):
-        suggestions.append(SuggestionItem(
-            asset_type=s.get("asset_type", "unknown"),
-            instrument_name=s.get("instrument", ""),
-            instrument_id=s.get("instrument_id", ""),
-            amount=s.get("amount", 0),
-            percentage=s.get("percentage", 0),
-            reason=s.get("reason", ""),
-            highlight=s.get("highlight"),
-            current_rate=s.get("current_rate")
-        ))
-    
+
+    # Map pipeline output → SuggestionItem format
+    suggestions = _allocation_to_suggestions(result.get("allocation", []))
+
     return RecommendationResponse(
         id=plan.id,
         suggestions=suggestions,
-        summary=recommendation.get("summary", ""),
-        risk_note=recommendation.get("risk_note", ""),
-        tax_note=recommendation.get("tax_note"),
+        summary=result.get("explanation", ""),
+        risk_note=result.get("validation", {}).get("risk_note", ""),
+        tax_note=result.get("validation", {}).get("tax_note"),
         market_context=market_data,
-        valid_until=plan.expires_at
+        valid_until=plan.expires_at,
     )
-
 
 async def _get_available_options(
     db: AsyncSession,
@@ -479,3 +435,48 @@ async def _get_available_options_guest(
         ]
     
     return options 
+
+@router.post("/pipeline/guest")
+async def get_guest_pipeline_recommendation(
+    request: GuestPipelineInput,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Pipeline recommendation for guests.
+    No portfolio context — uses market signals + default moderate profile.
+    """
+    pipeline = RecommendationPipeline(db)
+    result = await pipeline.generate_guest(
+        amount=request.amount,
+        risk_override=request.risk_override,
+        preferences_override=request.preferences_override,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    # Add disclaimer for guests
+    result["disclaimer"] = (
+        "This is educational information based on current market data. "
+        "Not personalized investment advice. "
+        "Sign in to get portfolio-aware recommendations."
+    )
+    return result
+
+
+# ── Helper: convert allocation list → SuggestionItem list ──
+
+def _allocation_to_suggestions(allocation: list) -> List[SuggestionItem]:
+    suggestions = []
+    for a in allocation:
+        suggestions.append(SuggestionItem(
+            asset_type=a.get("asset_class", "unknown"),
+            instrument_name=a.get("instrument", a.get("asset_class", "")),
+            instrument_id=a.get("instrument_id", ""),
+            amount=a.get("amount", 0),
+            percentage=a.get("percentage", 0),
+            reason=a.get("reason", ""),
+            highlight=a.get("highlight"),
+            current_rate=a.get("current_rate"),
+        ))
+    return suggestions

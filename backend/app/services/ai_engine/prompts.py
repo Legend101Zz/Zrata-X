@@ -93,6 +93,58 @@ HEADLINES:
 """
 
 
+INSTRUMENT_SELECTION_PROMPT = """You are selecting specific instruments for a monthly investment plan.
+
+ALLOCATION (calculated by Python — amounts are FINAL, do not change totals):
+{allocation_json}
+
+STRATEGY GUIDANCE FROM EARLIER:
+{guidance_json}
+
+USER RISK TOLERANCE: {risk_tolerance}
+CURRENT PORTFOLIO: {portfolio_json}
+
+AVAILABLE INSTRUMENTS (pre-filtered, all valid):
+
+EQUITY (Mutual Funds):
+{equity_shortlist}
+
+DEBT (Fixed Deposits):
+{debt_shortlist}
+
+GOLD/SILVER (ETFs):
+{gold_shortlist}
+
+YOUR JOB:
+- Pick 2-4 instruments per asset class from the shortlists above
+- Split each bucket's ₹ amount across your picks
+- Explain WHY each pick suits this user (1 sentence)
+- You MUST use the exact "id" values from the shortlists — do not invent names
+
+RULES:
+- Only pick from the shortlists. No other instruments.
+- Amounts per asset class MUST equal the allocation amounts.
+- Max 60% of any bucket to a single instrument.
+- For equity: prefer category diversification (don't pick 3 large-cap funds).
+- For debt: highlight credit-card-against-FD if available.
+- For gold: prefer lowest expense ratio.
+
+Respond with JSON:
+{{
+  "instruments": [
+    {{
+      "asset_class": "equity|debt|gold",
+      "instrument_name": "exact name from shortlist",
+      "instrument_id": "exact id from shortlist",
+      "amount": 0,
+      "reason": "1 sentence why",
+      "highlight": "optional special note or null"
+    }}
+  ],
+  "selection_reasoning": "2 sentences on overall instrument selection logic"
+}}
+"""
+
 # ─────────────────────────────────────────────────────────────
 # STRATEGY PROMPT
 # Given signals + portfolio, decide allocation direction

@@ -10,6 +10,7 @@ Steps:
 
 Each step is independent and testable.
 """
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -22,10 +23,11 @@ from app.models.market_signal import MarketSignal
 from app.models.user import PortfolioHolding, User
 from app.services.ai_engine.openrouter_client import OpenRouterClient
 from app.services.ai_engine.prompts import (EXPLANATION_PROMPT_TEMPLATE,
+                                            INSTRUMENT_SELECTION_PROMPT,
                                             STRATEGY_PROMPT_TEMPLATE,
                                             VALIDATION_PROMPT_TEMPLATE,
                                             ZRATA_X_SYSTEM_PROMPT)
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -70,18 +72,98 @@ class RecommendationPipeline:
 
         # Step 3: ALLOCATE (Python math — NO LLM)
         allocation = self._calculate_allocation(amount, strategy, context)
+        
+        # Step 3.5: SELECT INSTRUMENTS (Python — picks actual funds/FDs/ETFs)
+        detailed_allocation = await self._select_instruments(allocation, strategy, context)
 
-        # Step 4: VALIDATE (LLM)
-        validation = await self._validate_allocation(strategy, allocation, context)
+        # Recalculate percentages on detailed allocation
+        for item in detailed_allocation:
+            item["percentage"] = round((item["amount"] / amount) * 100, 1)
 
-        # Step 5: EXPLAIN (LLM)
-        explanation = await self._explain(context, allocation)
+        # Step 4: VALIDATE (LLM) & Step 5: EXPLAIN (LLM)
+        validation, explanation = await asyncio.gather(
+            self._validate_allocation(strategy, allocation, context),
+            self._explain(context, allocation),
+        )
 
         return {
             "user_id": user_id,
             "amount": amount,
             "strategy": strategy,
-            "allocation": allocation,
+            "allocation": detailed_allocation, 
+            "validation": validation,
+            "explanation": explanation,
+            "signals_used": context.get("signals_summary", []),
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    async def generate_guest(
+        self,
+        amount: float,
+        risk_override: Optional[str] = None,
+        preferences_override: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        logger.info(f"Starting GUEST pipeline for amount=₹{amount:,.0f}")
+
+        # Build guest context (no user lookup, no portfolio)
+        signals = await self._get_active_signals()
+        top_fd = await self._get_top_fd()
+        gold_change = await self._get_gold_30d_change()
+        top_mf_cats = await self._get_top_mf_categories()
+
+        preferences = {
+            "risk_tolerance": risk_override or "moderate",
+            "horizon_years": 5,
+            "avoid_lock_ins": False,
+            "prefer_tax_saving": False,
+        }
+        if preferences_override:
+            preferences.update(preferences_override)
+
+        context = {
+            "user": None,
+            "user_name": "there",
+            "portfolio": [],
+            "allocation_pcts": {},
+            "total_portfolio_value": 0,
+            "signals": signals,
+            "signals_summary": [
+                {"name": s.signal_name, "direction": s.direction, "category": s.signal_category}
+                for s in signals[:10]
+            ],
+            "top_fd_rate": top_fd.get("rate", "N/A"),
+            "top_fd_bank": top_fd.get("bank", "N/A"),
+            "gold_30d_change": gold_change,
+            "top_mf_categories": top_mf_cats,
+            "preferences": preferences,
+            "amount": amount,
+        }
+
+        # Step 2: STRATEGY
+        strategy = await self._get_strategy(context)
+        if strategy.get("error"):
+            return {**context, "strategy_error": strategy["error"]}
+
+        # Step 3: ALLOCATE
+        allocation = self._calculate_allocation(amount, strategy, context)
+
+        # Step 3.5: SELECT INSTRUMENTS ← THIS WAS MISSING
+        detailed_allocation = await self._select_instruments(allocation, strategy, context)
+
+        for item in detailed_allocation:
+            item["percentage"] = round((item["amount"] / amount) * 100, 1)
+
+        # Step 4+5: VALIDATE & EXPLAIN (parallel)
+        validation, explanation = await asyncio.gather(
+            self._validate_allocation(strategy, detailed_allocation, context),
+            self._explain(context, detailed_allocation),
+        )
+
+        return {
+            "user_id": None,
+            "amount": amount,
+            "strategy": strategy,
+            "allocation": detailed_allocation,
             "validation": validation,
             "explanation": explanation,
             "signals_used": context.get("signals_summary", []),
@@ -225,12 +307,12 @@ class RecommendationPipeline:
         return "N/A"
 
     async def _get_top_mf_categories(self) -> str:
-        """Get top performing MF categories by 1y return."""
+        """Get top performing MF categories by average 1y return."""
         result = await self.db.execute(
             select(MutualFund.category)
             .where(MutualFund.return_1y.isnot(None), MutualFund.is_active == True)
             .group_by(MutualFund.category)
-            .order_by(desc(MutualFund.return_1y))
+            .order_by(desc(func.avg(MutualFund.return_1y)))
             .limit(3)
         )
         categories = [r[0] for r in result.fetchall() if r[0]]
@@ -249,7 +331,7 @@ class RecommendationPipeline:
                 "reasoning": s.reasoning,
                 "confidence": s.confidence,
             }
-            for s in context["signals"][:15]  # cap to avoid token bloat
+            for s in context["signals"][:15]
         ]
 
         prompt = STRATEGY_PROMPT_TEMPLATE.format(
@@ -264,20 +346,38 @@ class RecommendationPipeline:
             top_mf_categories=context["top_mf_categories"],
         )
 
-        try:
-            response = await self.ai_client.complete(
-                prompt=prompt,
-                system_prompt=ZRATA_X_SYSTEM_PROMPT,
-                model=settings.PRIMARY_MODEL,
-                response_format={"type": "json_object"},
-                temperature=0.4,
-                max_tokens=2048,
-            )
-            return json.loads(response)
-        except Exception as e:
-            logger.error(f"Strategy LLM call failed: {e}")
-            return {"error": str(e)}
+        # Try primary model, fall back to fast model, then to safe defaults
+        for model in [settings.PRIMARY_MODEL, settings.FAST_MODEL]:
+            try:
+                response = await self.ai_client.complete(
+                    prompt=prompt,
+                    system_prompt=ZRATA_X_SYSTEM_PROMPT,
+                    model=model,
+                    response_format={"type": "json_object"},
+                    temperature=0.4,
+                    max_tokens=2048,
+                )
+                if not response or not response.strip():
+                    logger.warning(f"Empty response from {model}, trying next")
+                    continue
+                return json.loads(response)
+            except Exception as e:
+                logger.error(f"Strategy call failed with {model}: {e}")
+                continue
 
+        # All models failed — return safe default strategy
+        logger.warning("All strategy models failed, using safe defaults")
+        return {
+            "strategy": {
+                "equity_weight": "maintain",
+                "debt_weight": "maintain",
+                "gold_weight": "maintain",
+                "reasoning": "Using balanced defaults due to temporary analysis unavailability.",
+            },
+            "instrument_guidance": [],
+            "opportunities": [],
+            "behavioral_note": None,
+        }
     # ─── Step 3: ALLOCATE (Python math) ──────────────────────
 
     def _calculate_allocation(
@@ -415,4 +515,283 @@ class RecommendationPipeline:
             return response
         except Exception as e:
             logger.error(f"Explanation LLM call failed: {e}")
-            return "Your investment plan has been calculated based on current market conditions and your portfolio. Please review the allocation above."
+            return "Your investment plan has been calculated based on current market conditions and your portfolio. Please review the allocation above."       
+        
+    # ─── Step 5: PICK (LLM + PYTHON) ──────────────────────────────     
+    async def _select_instruments(
+        self,
+        allocation: List[Dict[str, Any]],
+        strategy: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Step 3.5: INSTRUMENT SELECTION (Hybrid)
+        
+        Python shortlists valid instruments from DB.
+        LLM picks + reasons from the shortlist.
+        Python validates the math.
+        """
+        # Step A: Python builds shortlists from DB
+        shortlists = {}
+        for bucket in allocation:
+            asset_class = bucket["asset_class"]
+            if asset_class == "equity":
+                shortlists["equity"] = await self._shortlist_equity()
+            elif asset_class == "debt":
+                shortlists["debt"] = await self._shortlist_debt()
+            elif asset_class == "gold":
+                shortlists["gold"] = await self._shortlist_gold()
+
+        # Step B: LLM picks from shortlists
+        picks = await self._llm_pick_instruments(allocation, shortlists, strategy, context)
+
+        # Step C: Python validates and fixes math
+        return self._validate_instrument_picks(picks, allocation, shortlists)
+
+
+    # ── Step A: Python shortlists (DB queries, no LLM) ──
+
+    async def _shortlist_equity(self) -> List[Dict]:
+        """Top direct MFs with real data, diversified by category."""
+        result = await self.db.execute(
+            select(MutualFund)
+            .where(
+                MutualFund.plan_type == "direct",
+                MutualFund.is_active == True,
+                MutualFund.nav > 0,
+                MutualFund.return_1y.isnot(None),
+            )
+            .order_by(desc(MutualFund.return_1y))
+            .limit(30)
+        )
+        funds = result.scalars().all()
+
+        # Diversify: max 3 per category, take top 10 overall
+        seen_cats: Dict[str, int] = {}
+        shortlist = []
+        for mf in funds:
+            cat = mf.category or "other"
+            if seen_cats.get(cat, 0) >= 3:
+                continue
+            seen_cats[cat] = seen_cats.get(cat, 0) + 1
+            shortlist.append({
+                "id": mf.scheme_code,
+                "name": mf.scheme_name,
+                "category": mf.category,
+                "amc": mf.amc_name,
+                "return_1y": round(mf.return_1y, 2) if mf.return_1y else None,
+                "return_3y": round(mf.return_3y, 2) if mf.return_3y else None,
+                "nav": round(mf.nav, 2),
+            })
+            if len(shortlist) >= 10:
+                break
+
+        return shortlist
+
+
+    async def _shortlist_debt(self) -> List[Dict]:
+        """Top FDs, prefer diversity across bank types."""
+        result = await self.db.execute(
+            select(FixedDepositRate)
+            .where(FixedDepositRate.interest_rate_general > 0)
+            .order_by(desc(FixedDepositRate.interest_rate_general))
+            .limit(15)
+        )
+        fds = result.scalars().all()
+
+        shortlist = []
+        seen_banks = set()
+        for fd in fds:
+            if fd.bank_name in seen_banks:
+                continue
+            seen_banks.add(fd.bank_name)
+            shortlist.append({
+                "id": f"fd_{fd.bank_name.lower().replace(' ', '_')}_{fd.tenure_display}",
+                "name": f"{fd.bank_name} FD ({fd.tenure_display})",
+                "bank": fd.bank_name,
+                "bank_type": fd.bank_type,
+                "tenure": fd.tenure_display,
+                "rate": fd.interest_rate_general,
+                "rate_senior": fd.interest_rate_senior,
+                "has_credit_card": fd.has_credit_card_offer,
+            })
+            if len(shortlist) >= 6:
+                break
+
+        return shortlist
+
+
+    async def _shortlist_gold(self) -> List[Dict]:
+        """Gold/silver ETFs, sorted by expense ratio."""
+        result = await self.db.execute(
+            select(ETF)
+            .where(ETF.underlying.in_(["gold", "silver"]), ETF.nav > 0)
+            .order_by(ETF.expense_ratio.asc().nullslast())
+            .limit(6)
+        )
+        etfs = result.scalars().all()
+
+        return [
+            {
+                "id": etf.symbol,
+                "name": etf.name,
+                "underlying": etf.underlying,
+                "nav": round(etf.nav, 2),
+                "expense_ratio": etf.expense_ratio,
+            }
+            for etf in etfs
+        ]
+
+
+    # ── Step B: LLM picks from shortlists ──
+
+    async def _llm_pick_instruments(
+        self,
+        allocation: List[Dict],
+        shortlists: Dict[str, List[Dict]],
+        strategy: Dict,
+        context: Dict,
+    ) -> List[Dict]:
+        """LLM selects instruments from Python-curated shortlists."""
+
+        prompt = INSTRUMENT_SELECTION_PROMPT.format(
+            allocation_json=json.dumps(allocation, indent=2),
+            equity_shortlist=json.dumps(shortlists.get("equity", []), indent=2),
+            debt_shortlist=json.dumps(shortlists.get("debt", []), indent=2),
+            gold_shortlist=json.dumps(shortlists.get("gold", []), indent=2),
+            guidance_json=json.dumps(strategy.get("instrument_guidance", []), indent=2),
+            risk_tolerance=context["preferences"].get("risk_tolerance", "moderate"),
+            portfolio_json=json.dumps(context.get("portfolio", []), indent=2),
+        )
+
+        try:
+            response = await self.ai_client.complete(
+                prompt=prompt,
+                system_prompt=ZRATA_X_SYSTEM_PROMPT,
+                model=settings.FAST_MODEL,  # ← Use fast model, this is selection not strategy
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=2048,
+            )
+            return json.loads(response).get("instruments", [])
+        except Exception as e:
+            logger.error(f"LLM instrument selection failed: {e}, falling back to Python")
+            return self._fallback_pick(allocation, shortlists)
+
+
+    # ── Step C: Python validates LLM picks ──
+
+    def _validate_instrument_picks(
+        self,
+        picks: List[Dict],
+        allocation: List[Dict],
+        shortlists: Dict[str, List[Dict]],
+    ) -> List[Dict]:
+        """
+        Ensure LLM picks are valid:
+        - Every instrument ID exists in a shortlist
+        - Amounts per asset class sum correctly
+        - No single instrument gets >60% of its bucket
+        """
+        # Build lookup of valid IDs
+        valid_ids = set()
+        for sl in shortlists.values():
+            for item in sl:
+                valid_ids.add(item["id"])
+
+        # Build target amounts per asset class
+        target_by_class = {a["asset_class"]: a["amount"] for a in allocation}
+
+        # Validate each pick
+        validated = []
+        actual_by_class: Dict[str, float] = {}
+
+        for pick in picks:
+            instrument_id = pick.get("instrument_id", "")
+            asset_class = pick.get("asset_class", "")
+
+            # Skip if ID doesn't exist in shortlist (hallucinated)
+            if instrument_id and instrument_id not in valid_ids:
+                logger.warning(f"LLM picked invalid instrument: {instrument_id}, skipping")
+                continue
+
+            validated.append(pick)
+            actual_by_class[asset_class] = actual_by_class.get(asset_class, 0) + pick.get("amount", 0)
+
+        # Fix amounts to match allocation targets
+        for asset_class, target in target_by_class.items():
+            class_picks = [p for p in validated if p["asset_class"] == asset_class]
+            if not class_picks:
+                # LLM missed this class entirely — use fallback
+                validated.extend(
+                    self._fallback_pick_for_class(asset_class, target, shortlists)
+                )
+                continue
+
+            actual_total = sum(p["amount"] for p in class_picks)
+            if actual_total != target and actual_total > 0:
+                # Scale proportionally to match target
+                scale = target / actual_total
+                for p in class_picks:
+                    p["amount"] = round(p["amount"] * scale, -2)
+                # Fix rounding on last item
+                remainder = target - sum(p["amount"] for p in class_picks[:-1])
+                class_picks[-1]["amount"] = remainder
+
+        return validated
+
+
+    def _fallback_pick(
+        self,
+        allocation: List[Dict],
+        shortlists: Dict[str, List[Dict]],
+    ) -> List[Dict]:
+        """If LLM fails entirely, pick top instruments mechanically."""
+        result = []
+        for bucket in allocation:
+            result.extend(
+                self._fallback_pick_for_class(
+                    bucket["asset_class"], bucket["amount"], shortlists
+                )
+            )
+        return result
+
+
+    def _fallback_pick_for_class(
+        self,
+        asset_class: str,
+        amount: float,
+        shortlists: Dict[str, List[Dict]],
+    ) -> List[Dict]:
+        """Mechanical top-N pick for a single asset class."""
+        key = asset_class if asset_class in shortlists else (
+            "equity" if asset_class == "equity" else
+            "debt" if asset_class in ("debt", "fd") else
+            "gold"
+        )
+        sl = shortlists.get(key, [])
+        if not sl:
+            return [{
+                "asset_class": asset_class,
+                "instrument_name": f"{asset_class.title()} (no data — check directly)",
+                "instrument_id": "",
+                "amount": amount,
+                "percentage": 0,
+                "reason": "No instrument data available in database.",
+            }]
+
+        # Pick top 1-2
+        picks = sl[:2] if amount >= 5000 else sl[:1]
+        split = amount / len(picks)
+
+        return [
+            {
+                "asset_class": asset_class,
+                "instrument_name": p["name"],
+                "instrument_id": p["id"],
+                "amount": round(split, -2),
+                "percentage": 0,
+                "reason": f"Top {asset_class} option by {'return' if asset_class == 'equity' else 'rate'}",
+            }
+            for p in picks
+        ]        

@@ -185,6 +185,11 @@ export interface PipelineAllocation {
   asset_class: string;
   amount: number;
   percentage: number;
+  instrument_name?: string;
+  instrument_id?: string;
+  reason?: string;
+  highlight?: string | null;
+  current_rate?: number | null;
 }
 
 export interface PipelineStrategy {
@@ -220,18 +225,15 @@ export interface PipelineValidation {
 }
 
 export interface PipelineResponse {
-  user_id: number;
+  user_id: number | null;
   amount: number;
-  strategy: PipelineStrategy;
-  allocation: PipelineAllocation[];
-  validation: PipelineValidation;
+  strategy: Record<string, unknown>;
+  allocation: AllocationItem[];
+  validation: Record<string, unknown>;
   explanation: string;
-  signals_used: Array<{
-    name: string;
-    direction: string;
-    category: string;
-  }>;
+  signals_used: SignalSummary[];
   generated_at: string;
+  disclaimer?: string; // ← add this for guest responses
 }
 
 // ============ Market Signals (NEW) ============

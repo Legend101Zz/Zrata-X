@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     METALS_API_KEY: Optional[str] = None  # Optional: for gold prices
     
     # AI Models (configurable via env - not hardcoded)
-    PRIMARY_MODEL: str = "deepseek/deepseek-r1-0528"
-    FAST_MODEL: str = "deepseek/deepseek-r1-0528"
+    PRIMARY_MODEL: str = "openai/gpt-oss-120b"
+    FAST_MODEL: str = "openai/gpt-oss-120b"
     
     # Security
     SECRET_KEY: str
