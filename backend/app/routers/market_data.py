@@ -327,6 +327,41 @@ async def get_market_news(
     return news_items
 
 
+@router.get("/signals/active")
+async def get_active_signals(
+    category: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get active market signals for frontend display."""
+    from app.models.market_signal import MarketSignal
+    
+    query = select(MarketSignal).where(
+        MarketSignal.is_active == True,
+        MarketSignal.confidence >= 0.4,
+    ).order_by(desc(MarketSignal.confidence)).limit(50)
+    
+    if category:
+        query = query.where(MarketSignal.signal_category == category)
+    
+    result = await db.execute(query)
+    signals = result.scalars().all()
+    
+    return [
+        {
+            "id": s.id,
+            "signal_name": s.signal_name,
+            "signal_category": s.signal_category,
+            "direction": s.direction,
+            "strength": s.strength,
+            "affected_asset_classes": s.affected_asset_classes or [],
+            "reasoning": s.reasoning,
+            "confidence": s.confidence,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in signals
+    ]
+
+
 @router.post("/refresh")
 async def trigger_data_refresh(
     data_type: str = Query(..., pattern="^(fd_rates|mf_nav|gold_prices|news|all)$"),

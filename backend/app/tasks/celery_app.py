@@ -110,6 +110,39 @@ celery_app.conf.beat_schedule = {
     },
     
     # =====================================================
+    # RSS NEWS INGESTION (lightweight, run frequently)
+    # =====================================================
+    "ingest-rss-morning": {
+        "task": "app.tasks.data_refresh_tasks.ingest_rss_news",
+        "schedule": crontab(hour=7, minute=30),
+    },
+    "ingest-rss-afternoon": {
+        "task": "app.tasks.data_refresh_tasks.ingest_rss_news",
+        "schedule": crontab(hour=13, minute=30),
+    },
+    "ingest-rss-evening": {
+        "task": "app.tasks.data_refresh_tasks.ingest_rss_news",
+        "schedule": crontab(hour=19, minute=30),
+    },
+
+    # =====================================================
+    # SIGNAL PROCESSING (runs after news ingestion)
+    # Converts raw news → structured MarketSignal rows
+    # =====================================================
+    "process-signals-morning": {
+        "task": "app.tasks.data_refresh_tasks.process_signals",
+        "schedule": crontab(hour=8, minute=0),  # 30 min after RSS ingest
+    },
+    "process-signals-afternoon": {
+        "task": "app.tasks.data_refresh_tasks.process_signals",
+        "schedule": crontab(hour=14, minute=30),
+    },
+    "process-signals-evening": {
+        "task": "app.tasks.data_refresh_tasks.process_signals",
+        "schedule": crontab(hour=20, minute=30),
+    },
+    
+    # =====================================================
     # CLEANUP (keep DB size manageable)
     # =====================================================
     "cleanup-old-data-weekly": {

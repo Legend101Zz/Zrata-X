@@ -5,6 +5,7 @@ No hardcoded values - everything is discovered and stored dynamically.
 import enum
 
 from app.database import Base
+from app.models.market_signal import MarketSignal  # noqa: F401
 from sqlalchemy import (JSON, Boolean, Column, DateTime, Enum, Float,
                         ForeignKey, Integer, String, Text)
 from sqlalchemy.orm import relationship

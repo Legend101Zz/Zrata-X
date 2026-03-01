@@ -3,10 +3,13 @@ OpenRouter client for AI-powered analysis and recommendations.
 """
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
 from app.config import get_settings
+
+from ..logging.log import prompt_logger
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -21,7 +24,7 @@ class OpenRouterClient:
     def __init__(self):
         self.base_url = settings.OPENROUTER_BASE_URL
         self.api_key = settings.OPENROUTER_API_KEY
-        self.client = httpx.AsyncClient(timeout=60.0)
+        self.client = httpx.AsyncClient(timeout=600.0)
     
     async def complete(
         self,
@@ -51,7 +54,18 @@ class OpenRouterClient:
         
         if response_format:
             payload["response_format"] = response_format
-        
+            
+        # 🔥 LOG EVERYTHING BEFORE SENDING
+        try:
+            self._log_ai_request(
+                model=model,
+                system_prompt=system_prompt,
+                prompt=prompt,
+                payload=payload
+            )
+        except Exception as e:
+                logger.warning(f"Prompt logging failed: {e}")
+                    
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -68,6 +82,14 @@ class OpenRouterClient:
             response.raise_for_status()
             
             data = response.json()
+            
+            # (Optional) log response too if you want
+            prompt_logger.info(json.dumps({
+                "timestamp": datetime.utcnow().isoformat(),
+                "model": model,
+                "response": data["choices"][0]["message"]["content"]
+            }, ensure_ascii=False))
+            
             return data["choices"][0]["message"]["content"]
             
         except httpx.HTTPStatusError as e:
@@ -247,3 +269,20 @@ class OpenRouterClient:
             return result if isinstance(result, list) else result.get("items", [])
         except json.JSONDecodeError:
             return []
+        
+    def _log_ai_request(
+        self,
+        model: str,
+        system_prompt: str,
+        prompt: str,
+        payload: Dict[str, Any]
+    ):
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "model": model,
+            "system_prompt": system_prompt,
+            "user_prompt": prompt,
+            "payload": payload
+        }
+
+        prompt_logger.info(json.dumps(log_entry, ensure_ascii=False))

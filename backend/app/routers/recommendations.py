@@ -10,6 +10,8 @@ from app.models.asset_data import (ETF, FixedDepositRate, MacroIndicator,
 from app.models.user import (InvestmentPlan, PortfolioHolding, RiskTolerance,
                              User)
 from app.services.ai_engine.openrouter_client import OpenRouterClient
+from app.services.ai_engine.recommendation_pipeline import \
+    RecommendationPipeline
 from app.services.memory.supermemory_service import SupermemoryService
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -123,13 +125,15 @@ async def get_investment_recommendation(
     }
     
     # Get AI recommendation
-    ai_client = OpenRouterClient()
-    recommendation = await ai_client.generate_investment_suggestion(
+    # ai_client = OpenRouterClient()
+    pipeline = RecommendationPipeline()
+    recommendation = await pipeline.run(
         investment_amount=request.amount,
         current_portfolio=current_portfolio,
         market_data=market_data,
         user_preferences=preferences,
-        available_options=available_options
+        available_options=available_options,
+        user_context=user_context,
     )
     
     # Store the plan
@@ -175,36 +179,61 @@ async def _get_available_options(
     db: AsyncSession,
     request: InvestmentInput
 ) -> dict:
-    """Get available investment options dynamically."""
+    """Get available investment options dynamically. Only includes options with real data."""
     options = {}
+    data_gaps = []  # Track what data we're missing
     
-    # Top mutual funds by category
+    # Top mutual funds by category — ONLY with valid NAV and returns
     mf_result = await db.execute(
         select(MutualFund)
-        .where(MutualFund.plan_type == "direct")
+        .where(
+            MutualFund.plan_type == "direct",
+            MutualFund.nav > 0,  # Must have real NAV
+            MutualFund.is_active == True,
+        )
         .order_by(MutualFund.return_1y.desc().nullslast())
         .limit(50)
     )
     mutual_funds = mf_result.scalars().all()
+    
+    # Further filter: prefer funds WITH return data
+    funds_with_returns = [mf for mf in mutual_funds if mf.return_1y is not None]
+    funds_without_returns = [mf for mf in mutual_funds if mf.return_1y is None]
+    
+    # Use funds with returns first, backfill with NAV-only funds if needed
+    selected_funds = funds_with_returns[:30] + funds_without_returns[:10]
+    
+    if not funds_with_returns:
+        data_gaps.append("mutual_fund_returns")
+    if not selected_funds:
+        data_gaps.append("mutual_funds")
+    
     options["mutual_funds"] = [
         {
             "scheme_code": mf.scheme_code,
             "name": mf.scheme_name,
             "category": mf.category,
+            "amc": mf.amc_name,
+            "nav": mf.nav,
+            "nav_date": mf.nav_date.isoformat() if mf.nav_date else None,
             "return_1y": mf.return_1y,
-            "nav": mf.nav
+            "return_3y": mf.return_3y,
+            "return_5y": mf.return_5y,
         }
-        for mf in mutual_funds
+        for mf in selected_funds
     ]
     
     # Best FD rates if included
     if request.include_fds:
         fd_result = await db.execute(
             select(FixedDepositRate)
+            .where(FixedDepositRate.interest_rate_general > 0)
             .order_by(FixedDepositRate.interest_rate_general.desc())
             .limit(20)
         )
         fds = fd_result.scalars().all()
+        if not fds:
+            data_gaps.append("fixed_deposits")
         options["fixed_deposits"] = [
             {
                 "bank": fd.bank_name,
@@ -212,7 +241,7 @@ async def _get_available_options(
                 "tenure": fd.tenure_display,
                 "rate_general": fd.interest_rate_general,
                 "rate_senior": fd.interest_rate_senior,
-                "has_credit_card": fd.has_credit_card_offer
+                "has_credit_card": fd.has_credit_card_offer,
             }
             for fd in fds
         ]
@@ -220,22 +249,33 @@ async def _get_available_options(
     # Gold/Silver options if included
     if request.include_gold:
         etf_result = await db.execute(
-            select(ETF).where(ETF.underlying.in_(["gold", "silver"]))
+            select(ETF).where(
+                ETF.underlying.in_(["gold", "silver"]),
+                ETF.nav > 0,  # Must have real price
+            )
         )
         etfs = etf_result.scalars().all()
+        if not etfs:
+            data_gaps.append("gold_silver_etfs")
         options["gold_silver_etfs"] = [
             {
                 "symbol": etf.symbol,
                 "name": etf.name,
                 "underlying": etf.underlying,
                 "nav": etf.nav,
-                "expense_ratio": etf.expense_ratio
+                "expense_ratio": etf.expense_ratio,
             }
             for etf in etfs
         ]
     
+    # Attach data quality info so LLM knows what it's working with
+    options["_data_quality"] = {
+        "mutual_funds_with_returns": len(funds_with_returns),
+        "mutual_funds_nav_only": len(funds_without_returns),
+        "data_gaps": data_gaps,
+    }
+    
     return options
-
 
 async def _get_market_snapshot(db: AsyncSession) -> dict:
     """Get current market conditions."""
@@ -256,6 +296,24 @@ async def _get_market_snapshot(db: AsyncSession) -> dict:
     
     return snapshot
 
+
+@router.post("/pipeline")
+async def get_pipeline_recommendation(
+    user_id: int,
+    request: InvestmentInput,
+    db: AsyncSession = Depends(get_db)
+):
+    """Multi-step pipeline recommendation."""
+    from app.services.ai_engine.recommendation_pipeline import \
+        RecommendationPipeline
+    
+    pipeline = RecommendationPipeline(db)
+    result = await pipeline.generate(
+        user_id=user_id,
+        amount=request.amount,
+        risk_override=request.risk_override,
+    )
+    return result
 
 @router.post("/backtest")
 async def backtest_strategy(
@@ -420,4 +478,4 @@ async def _get_available_options_guest(
             for etf in etfs
         ]
     
-    return options
+    return options 

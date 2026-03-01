@@ -1,45 +1,22 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
-import "./globals.css";
-import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-});
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Zrata-X | The Passive Compounder",
+  title: "Zrata-X — The Passive Compounder",
   description:
-    "A calm, portfolio-aware monthly investment co-pilot for Indian working professionals.",
-  keywords: [
-    "investing",
-    "portfolio",
-    "India",
-    "mutual funds",
-    "FD",
-    "passive investing",
-  ],
+    "Monthly investment co-pilot for Indian working professionals. No trading. No charts. Just calm, portfolio-aware allocation.",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans`}>
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+      <body className="min-h-screen bg-grain">
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

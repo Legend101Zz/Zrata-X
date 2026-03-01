@@ -280,3 +280,39 @@ def update_portfolio_values():
             return {"updated": updated}
     
     return run_async(_update())
+
+
+@shared_task(name="app.tasks.data_refresh_tasks.ingest_rss_news")
+def ingest_rss_news():
+    """Ingest news from RSS feeds."""
+    async def _ingest():
+        AsyncSessionLocal = get_async_session()
+        async with AsyncSessionLocal() as db:
+            from app.services.data_scrapers.rss_news_ingester import \
+                RSSNewsIngester
+            
+            ingester = RSSNewsIngester(db)
+            try:
+                result = await ingester.ingest_all_feeds()
+                logger.info(f"RSS ingestion completed: {result}")
+                return result
+            finally:
+                await ingester.close()
+    
+    return run_async(_ingest())
+
+
+@shared_task(name="app.tasks.data_refresh_tasks.process_signals")
+def process_signals():
+    """Convert raw news into structured market signals."""
+    async def _process():
+        AsyncSessionLocal = get_async_session()
+        async with AsyncSessionLocal() as db:
+            from app.services.ai_engine.signal_processor import SignalProcessor
+            
+            processor = SignalProcessor(db)
+            result = await processor.process_unprocessed_news()
+            logger.info(f"Signal processing completed: {result}")
+            return result
+    
+    return run_async(_process())

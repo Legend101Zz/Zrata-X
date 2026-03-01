@@ -180,3 +180,69 @@ export interface AuthResponse {
   token_type: string;
   user: User;
 }
+
+export interface PipelineAllocation {
+  asset_class: string;
+  amount: number;
+  percentage: number;
+}
+
+export interface PipelineStrategy {
+  strategy: {
+    equity_weight: "increase" | "maintain" | "decrease";
+    debt_weight: "increase" | "maintain" | "decrease";
+    gold_weight: "increase" | "maintain" | "decrease";
+    reasoning: string;
+  };
+  instrument_guidance: Array<{
+    asset_class: string;
+    preference: string;
+    why: string;
+    avoid: string | null;
+  }>;
+  opportunities: Array<{
+    type: string;
+    description: string;
+    urgency: "low" | "medium" | "high";
+    relevant_if: string;
+  }>;
+  behavioral_note: string | null;
+}
+
+export interface PipelineValidation {
+  validation: "pass" | "flag";
+  flags: Array<{
+    issue: string;
+    severity: "info" | "warning" | "critical";
+    suggestion: string;
+  }>;
+  explanation: string;
+}
+
+export interface PipelineResponse {
+  user_id: number;
+  amount: number;
+  strategy: PipelineStrategy;
+  allocation: PipelineAllocation[];
+  validation: PipelineValidation;
+  explanation: string;
+  signals_used: Array<{
+    name: string;
+    direction: string;
+    category: string;
+  }>;
+  generated_at: string;
+}
+
+// ============ Market Signals (NEW) ============
+export interface MarketSignal {
+  id: number;
+  signal_name: string;
+  signal_category: string;
+  direction: "bullish" | "bearish" | "neutral";
+  strength: "low" | "medium" | "high";
+  affected_asset_classes: string[];
+  reasoning: string;
+  confidence: number;
+  created_at: string;
+}
